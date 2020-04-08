@@ -7,12 +7,31 @@ if (!exists("mutate")) {
   message("Project already initialised")
 }
 
+# Some cities included in the Crime Open Database aren't included here because
+# the data aren't updated frequently enough or don't include the necessary crime
+# types. Excluded cities are Fort Worth, Kansas City, Mesa and Virginia Beach
+
+# Houston has suitable data with NIBRS codes and date/times back to 2008 at 
+# https://www.houstontx.gov/police/cs/Monthly_Crime_Data_by_Street_and_Police_Beat.htm
+# but only updated every couple of months
+
+# Seattle has suitable data with NIBRS codes and date/times back to 2009 at
+# https://www.seattle.gov/police/information-and-data/crime-dashboard but only 
+# updated every couple of months, hidden inside a Tableau dashboard and encoded
+# using UTF-16LE in a TSV file with a CSV extension, meaning it must be loaded 
+# with the code:
+# read.csv(file("data.csv",encoding="UCS-2LE"), sep = "\t", stringsAsFactors = FALSE)
+
 # create tibble of data URLs
 data_urls <- tribble(
   ~city, ~url,
+  # "Atlanta early", "https://www.atlantapd.org/Home/ShowDocument?id=3051",
+  "Atlanta late", "https://www.atlantapd.org/Home/ShowDocument?id=3187", # or maybe https://www.atlantapd.org/Home/ShowDocument?id=3169
   "Austin", "https://data.austintexas.gov/api/views/fdj4-gpfu/rows.csv?accessType=DOWNLOAD",
+  "Baltimore", "https://data.baltimorecity.gov/api/views/wsfq-mvij/rows.csv?accessType=DOWNLOAD",
   "Boston", "https://data.boston.gov/dataset/6220d948-eae2-4e4b-8723-2dc8e67722a3/resource/12cb3883-56f5-47de-afa5-3b1cf61b257b/download/tmpeb3z80ty.csv",
   "Chicago", "https://data.cityofchicago.org/api/views/ijzp-q8t2/rows.csv?accessType=DOWNLOAD",
+  "Dallas", "https://www.dallasopendata.com/api/views/qv6i-rri7/rows.csv?accessType=DOWNLOAD",
   # "Los Angeles early", "https://data.lacity.org/api/views/63jg-8b9z/rows.csv?accessType=DOWNLOAD",
   "Los Angeles late", "https://data.lacity.org/api/views/2nrs-mtv8/rows.csv?accessType=DOWNLOAD",
   # "Louisville 2016", "https://data.louisvilleky.gov/sites/default/files/Crime_Data_2016_39.csv",
@@ -20,21 +39,96 @@ data_urls <- tribble(
   # "Louisville 2018", "http://lky-open-data.s3.amazonaws.com/LMPD/Crime_Data_2018.csv",
   "Louisville 2019", "https://data.louisvilleky.gov/sites/default/files/27091/Crime_Data_2019.csv", # includes 2020 for now
   "Memphis", "https://memphisinternal.data.socrata.com/api/views/ybsi-jur4/rows.csv?accessType=DOWNLOAD",
+  "Montgomery County", "https://data.montgomerycountymd.gov/api/views/icn6-v9z3/rows.csv?accessType=DOWNLOAD",
   # "Nashville 2016", "https://data.nashville.gov/api/views/tpvn-3k6v/rows.csv?accessType=DOWNLOAD",
   # "Nashville 2017", "https://data.nashville.gov/api/views/ei8z-vngg/rows.csv?accessType=DOWNLOAD",
   # "Nashville 2018", "https://data.nashville.gov/api/views/we5n-wkcf/rows.csv?accessType=DOWNLOAD",
   # "Nashville 2019", "https://data.nashville.gov/api/views/a88c-cc2y/rows.csv?accessType=DOWNLOAD",
   "Nashville 2020", "https://data.nashville.gov/api/views/sie3-y9k4/rows.csv?accessType=DOWNLOAD",
+  "Philadelphia", "https://phl.carto.com/api/v2/sql?q=SELECT+*+FROM+incidents_part1_part2&filename=incidents_part1_part2&format=geojson&skipfields=cartodb_id",
+  "Phoenix", "https://www.phoenixopendata.com/dataset/cc08aace-9ca9-467f-b6c1-f0879ab1a358/resource/0ce3411a-2fc6-4302-a33f-167f68608a20/download/crimestat.csv",
+  # "Sacramento 2016", "https://opendata.arcgis.com/datasets/64ab02f77ad94bfb807e501c57f720e8_0.csv",
+  # "Sacramento 2017", "https://opendata.arcgis.com/datasets/6023972e7b994c58bf87c4424b60539b_0.csv",
+  # "Sacramento 2018", "https://opendata.arcgis.com/datasets/84e4483fc0624d678d7608a4fa12aae1_0.csv",
+  # "Sacramento 2019", "https://opendata.arcgis.com/datasets/0026878c24454e16b169b3fb26130751_0.csv",
+  "Sacramento 2020", "https://opendata.arcgis.com/datasets/64279ca193a54189aa9214a29d32520c_0.csv",
   # "San Francisco early", "https://data.sfgov.org/api/views/tmnf-yvry/rows.csv?accessType=DOWNLOAD",
-  "San Francisco late", "https://data.sfgov.org/api/views/wg3w-h783/rows.csv?accessType=DOWNLOAD"
+  "San Francisco late", "https://data.sfgov.org/api/views/wg3w-h783/rows.csv?accessType=DOWNLOAD",
+  # "Tucson 2016", "https://opendata.arcgis.com/datasets/ff59ac036cc14689923596abf88f3e24_32.csv?outSR=%7B%22latestWkid%22%3A2868%2C%22wkid%22%3A2868%7D",
+  # "Tucson 2017", "https://opendata.arcgis.com/datasets/ef95666c825645868d0f9db6770af969_33.csv?outSR=%7B%22latestWkid%22%3A2868%2C%22wkid%22%3A2868%7D",
+  # "Tucson 2018", "https://opendata.arcgis.com/datasets/6a11fe12a2f9444fa16e7b7ac810727e_40.csv?outSR=%7B%22latestWkid%22%3A2868%2C%22wkid%22%3A2868%7D",
+  # "Tucson 2019", "https://opendata.arcgis.com/datasets/9205a32aeab34091b1cd9bcea08eccfe_48.csv?outSR=%7B%22latestWkid%22%3A2868%2C%22wkid%22%3A2868%7D",
+  "Tucson 2020", "https://opendata.arcgis.com/datasets/0cd8b23211b84cdb9334a6b548916623_54.csv?outSR=%7B%22latestWkid%22%3A2868%2C%22wkid%22%3A2868%7D"
 ) %>% 
   mutate(string = str_to_lower(str_replace_all(city, "\\s", "_")))
 
 # download data
 walk2(data_urls$string, data_urls$url, function (string, url) {
-  raw_data_file <- glue::glue("original_data/raw_{string}.csv")
+  
+  message(glue::glue("Downloading {string} data from {url}"))
+
+  if (str_detect(string, "^atlanta")) {
+    raw_data_file <- glue::glue("original_data/raw_{string}.zip")
+  } else if (string == "philadelphia") {
+    raw_data_file <- glue::glue("original_data/raw_{string}.geojson")
+  } else {
+    raw_data_file <- glue::glue("original_data/raw_{string}.csv")
+  }
+  
   GET(url, write_disk(raw_data_file, overwrite = TRUE), progress())
+  
 })
+  
+  
+
+# process Atlanta data
+# https://www.atlantapd.org/i-want-to/crime-data-downloads
+dir("original_data", pattern = "raw_atlanta", full.names = TRUE) %>% 
+  map(unzip, exdir = here::here("original_data/atlanta")) %>% 
+  unlist() %>% 
+  str_subset("\\d\\.csv$") %>% 
+  map_dfr(read_csv, col_types = cols(.default = col_character())) %>% 
+  janitor::clean_names() %>% 
+  # add date variable
+  mutate(date_time = paste(occur_date, occur_time)) %>% 
+  add_date_var("date_time", "Ymd HM", "America/New_York") %>% 
+  # add year variable and remove offenses before start date
+  filter_by_year(yearFirst, yearLast) %>%
+  # add crime categories and location types
+  mutate(
+    nibrs_offense_code = recode(
+      ucr_literal,
+      "AGG ASSAULT" = "13A",
+      "AUTO THEFT" = "240",
+      "BURGLARY-NONRES" = "22B",
+      "BURGLARY-RESIDENCE" = "22A",
+      "HOMICIDE" = "09A",
+      "LARCENY-FROM VEHICLE" = "23F",
+      "LARCENY-NON VEHICLE" = "23U",
+      "MANSLAUGHTER" = "09B",
+      "ROBBERY-COMMERCIAL" = "12B",
+      "ROBBERY-PEDESTRIAN" = "12A",
+      "ROBBERY-RESIDENCE" = "12A",
+      .default = NA_character_
+    )
+  ) %>%
+  left_join(read_csv(here::here("analysis_data/nibrs_categories.csv")), 
+            by = "nibrs_offense_code") %>% 
+  # identify location types
+  # location types from https://www.atlantapd.org/Home/ShowDocument?id=2440
+  rename(location_code = location_type) %>% 
+  mutate(location_code = str_squish(location_code)) %>% 
+  left_join(
+    read_csv(here::here("analysis_data/location_types_atlanta.csv"), 
+             col_types = cols(.default = col_character())),
+    by = "location_code"
+  ) %>% 
+  # add city name
+  mutate(city_name = "Atlanta, GA") %>% 
+  # select core variables
+  select(one_of(common_vars)) %>% 
+  # save data
+  write_rds(here::here("analysis_data/crime_data_atlanta.rds"), compress = "gz")
 
 
 
@@ -159,14 +253,60 @@ here::here("original_data/raw_austin.csv") %>%
              col_types = cols(.default = col_character())),
     by = "location_type_raw"
   ) %>% 
-  # convert variable types
-  mutate(family_violence = family_violence == "Y") %>% 
   # add city name
-  mutate(city_name = "Austin") %>% 
+  mutate(city_name = "Austin, TX") %>% 
   # select core variables
   select(one_of(common_vars)) %>% 
   # save data
   write_rds(here::here("analysis_data/crime_data_austin.rds"), compress = "gz")
+
+
+
+# process Baltimore data
+# https://data.baltimorecity.gov/Public-Safety/BPD-Part-1-Victim-Based-Crime-Data/wsfq-mvij
+here::here("original_data/raw_baltimore.csv") %>% 
+  read_csv(col_types = cols(.default = col_character())) %>% 
+  janitor::clean_names() %>% 
+  # add date variable
+  mutate(date_time = paste(crime_date, crime_time)) %>% 
+  add_date_var("date_time", "mdY T", "America/New_York") %>% 
+  # filter by year
+  filter_by_year(yearFirst, yearLast) %>% 
+  # identify location types
+  left_join(
+    read_csv(here::here("analysis_data/location_types_baltimore.csv"), 
+             col_types = cols(.default = col_character())),
+    by = "premise"
+  ) %>% 
+  # add crime categories
+  mutate(
+    nibrs_offense_code = case_when(
+      description == "AGG. ASSAULT" ~ "13A",
+      description == "ARSON" ~ "200",
+      description == "AUTO THEFT" ~ "240",
+      description == "BURGLARY" & location_category == "residence" ~ "22A",
+      description == "BURGLARY" ~ "22B",
+      description == "COMMON ASSAULT" ~ "13B",
+      description == "HOMICIDE" ~ "09A",
+      description == "LARCENY" ~ "23U",
+      description == "LARCENY FROM AUTO" ~ "23F",
+      description == "RAPE" ~ "11A",
+      description == "ROBBERY - CARJACKING" ~ "12A",
+      description == "ROBBERY - COMMERCIAL" ~ "12B",
+      description == "ROBBERY - RESIDENCE" ~ "12A",
+      description == "ROBBERY - STREET" ~ "12A",
+      description == "SHOOTING" ~ "13A"
+    )
+  ) %>% 
+  left_join(read_csv(here::here("analysis_data/nibrs_categories.csv")), 
+            by = "nibrs_offense_code") %>% 
+  # add city name
+  mutate(city_name = "Baltimore, MD") %>% 
+  # select core variables
+  select(one_of(common_vars)) %>% 
+  # save data
+  write_rds(here::here("analysis_data/crime_data_baltimore.rds"), 
+            compress = "gz")
 
 
 
@@ -260,7 +400,7 @@ here::here("original_data/raw_boston.csv") %>%
   left_join(read_csv(here::here("analysis_data/nibrs_categories.csv")), 
             by = "nibrs_offense_code") %>% 
   # add city name
-  mutate(city_name = "Boston") %>% 
+  mutate(city_name = "Boston, MA") %>% 
   # select core variables
   select(one_of(common_vars)) %>% 
   # save data
@@ -329,11 +469,48 @@ here::here("original_data/raw_chicago.csv") %>%
     by = c("location_description" = "Location Description")
   ) %>% 
   # add city name
-  mutate(city_name = "Chicago") %>% 
+  mutate(city_name = "Chicago, IL") %>% 
   # select core variables
   select(one_of(common_vars)) %>% 
   # save data
   write_rds(here::here("analysis_data/crime_data_chicago.rds"), compress = "gz")
+
+
+
+# process Dallas data
+# https://www.dallasopendata.com/Public-Safety/Police-Incidents/qv6i-rri7
+here::here("original_data/raw_dallas.csv") %>% 
+  read_csv() %>% 
+  janitor::clean_names() %>% 
+  mutate(date_time = paste(date1_of_occurrence, time1_of_occurrence)) %>% 
+  add_date_var("date_time", "mdY HMS", "America/Chicago") %>%
+  # filter by year
+  filter_by_year(yearFirst, yearLast) %>% 
+  # add crime categories
+  rename(nibrs_offense_against = nibrs_crime_against, 
+         nibrs_offense_code = nibrs_code) %>% 
+  mutate(nibrs_offense_code = case_when(
+    nibrs_offense_code == "999" ~ "99Z",
+    nibrs_crime == "BURGLARY-RESIDENCE" ~ "22A",
+    nibrs_crime == "BURGLARY-BUSINESS" ~ "22B",
+    nibrs_crime == "ROBBERY-INDIVIDUAL" ~ "12A",
+    nibrs_crime == "ROBBERY-BUSINESS" ~ "12B",
+    TRUE ~ nibrs_offense_code
+  )) %>% 
+  left_join(read_csv(here::here("analysis_data/nibrs_categories.csv")), 
+            by = "nibrs_offense_code") %>% 
+  # identify location types
+  left_join(
+    read_csv(here::here("analysis_data/location_types_dallas.csv"), 
+             col_types = cols(.default = col_character())),
+    by = "type_location"
+  ) %>% 
+  # add city name
+  mutate(city_name = "Dallas, TX") %>% 
+  # select core variables
+  select(one_of(common_vars)) %>%
+  # save data
+  write_rds(here::here("analysis_data/crime_data_dallas.rds"), compress = "gz")
 
 
 
@@ -694,7 +871,7 @@ dir("original_data", pattern = "raw_los_angeles", full.names = TRUE) %>%
     by = c("premis_desc" = "premise_description")
   ) %>% 
   # add city name
-  mutate(city_name = "Los Angeles") %>% 
+  mutate(city_name = "Los Angeles, CA") %>% 
   # select core variables
   select(one_of(common_vars)) %>% 
   # save data
@@ -1119,7 +1296,7 @@ dir("original_data", pattern = "raw_louisville", full.names = TRUE) %>%
     by = "premise_type"
   ) %>% 
   # add city name
-  mutate(city_name = "Louisville") %>% 
+  mutate(city_name = "Louisville, KY") %>% 
   # select core variables
   select(one_of(common_vars)) %>% 
   # save data
@@ -1228,7 +1405,7 @@ here::here("original_data/raw_memphis.csv") %>%
   left_join(read_csv(here::here("analysis_data/nibrs_categories.csv")), 
             by = "nibrs_offense_type") %>% 
   # add city name
-  mutate(city_name = "Memphis") %>% 
+  mutate(city_name = "Memphis, TN") %>% 
   # select core variables
   select(one_of(common_vars)) %>% 
   # save data
@@ -1236,6 +1413,56 @@ here::here("original_data/raw_memphis.csv") %>%
             compress = "gz")
 
 
+
+# process Montgomery county data
+# https://data.montgomerycountymd.gov/Public-Safety/Crime/icn6-v9z3
+here::here("original_data/raw_montgomery_county.csv") %>% 
+  read_csv(col_types = cols(.default = col_character())) %>% 
+  janitor::clean_names() %>% 
+  # add date variable
+  add_date_var("start_date_time", "mdY IMS p", "America/Chicago") %>% 
+  # add year variable and remove offenses before start date
+  filter_by_year(yearFirst, yearLast) %>% 
+  # categorise offences
+  rename(nibrs_offense_code = nibrs_code) %>% 
+  mutate(nibrs_offense_code = case_when(
+    crime_name3 %in% c(
+      "ROBBERY - CARJACKING - ARMED", "ROBBERY - CARJACKING - STRONG-ARM", 
+      "ROBBERY - DOMESTIC", "ROBBERY - FORCIBLE PURSE SNATCHING", 
+      "ROBBERY - RESIDENTIAL-GUN", "ROBBERY - RESIDENTIAL-OTHER WEAPON", 
+      "ROBBERY - RESIDENTIAL-STRONG-ARM", "ROBBERY - STREET-GUN", 
+      "ROBBERY - STREET-OTHER WEAPON", "ROBBERY - STREET-STRONG-ARM"
+    ) ~ "12A",
+    crime_name3 %in% c(
+      "ROBBERY - BANKING-TYPE INST", "ROBBERY - BUSINESS-GUN", 
+      "ROBBERY - BUSINESS-OTHER WEAPON", "ROBBERY - BUSINESS-STRONG-ARM"
+    ) ~ "12B",
+    nibrs_offense_code == "120" ~ "12U",
+    crime_name3 %in% c("BURGLARY - FORCED ENTRY-RESIDENTIAL", 
+                       "BURGLARY - NO FORCED ENTRY-RESIDENTIAL") ~ "22A",
+    crime_name3 %in% c("BURGLARY - BANKING-TYPE INST", 
+                       "BURGLARY - FORCED ENTRY-NONRESIDENTIAL", 
+                       "BURGLARY - NO FORCED ENTRY-NONRESIDENTIAL") ~ "22B",
+    nibrs_offense_code == "220" ~ "22U",
+    TRUE ~ nibrs_offense_code
+  )) %>% 
+  left_join(read_csv(here::here("analysis_data/nibrs_categories.csv")), 
+            by = "nibrs_offense_code") %>% 
+  # identify location types
+  left_join(
+    read_csv("analysis_data/location_types_montgomery.csv",
+             col_types = cols(.default = col_character())),
+    by = "place"
+  ) %>% 
+  # add city name
+  mutate(city_name = "Montgomery County, MD") %>% 
+  # select core variables
+  select(one_of(common_vars)) %>% 
+  # save data
+  write_rds(here::here("analysis_data/crime_data_montgomery_county.rds"),
+            compress = "gz")
+
+  
 
 # process Nashville data
 dir("original_data", pattern = "raw_nashville", full.names = TRUE) %>% 
@@ -1268,7 +1495,7 @@ dir("original_data", pattern = "raw_nashville", full.names = TRUE) %>%
     by = "location_description"
   ) %>% 
   # add city name
-  mutate(city_name = "Nashville") %>% 
+  mutate(city_name = "Nashville, TN") %>% 
   # select core variables
   select(one_of(common_vars)) %>% 
   # save data
@@ -1276,6 +1503,136 @@ dir("original_data", pattern = "raw_nashville", full.names = TRUE) %>%
             compress = "gz")
 
 
+
+# process Philadelphia data
+# https://www.opendataphilly.org/dataset/crime-incidents
+here::here("original_data/raw_philadelphia.geojson") %>%
+  sf::read_sf() %>%
+  sf::st_set_geometry(NULL) %>% 
+  as_tibble() %>% 
+  janitor::clean_names() %>%
+  # add date variable
+  mutate(
+    date_year = year(dispatch_date_time),
+    date_single = strftime(dispatch_date_time, format = '%Y-%m-%d %H:%M', 
+                           tz = "America/New_York")
+  ) %>% 
+  # add year variable and remove offenses before start date
+  filter_by_year(yearFirst, yearLast) %>% 
+  # categorise offences
+  mutate(
+    nibrs_offense_code = recode(
+      text_general_code,
+      "Aggravated Assault Firearm" = "13A",
+      "Aggravated Assault No Firearm" = "13A",
+      "All Other Offenses" = "90Z",
+      "Arson" = "200",
+      "Burglary Non-Residential" = "22B",
+      "Burglary Residential" = "12A",
+      "Disorderly Conduct" = "90C",
+      "DRIVING UNDER THE INFLUENCE" = "90D",
+      "Embezzlement" = "270",
+      "Forgery and Counterfeiting" = "250",
+      "Fraud" = "26U",
+      "Homicide - Criminal" = "09A",
+      "Homicide - Criminal " = "09A",
+      "Homicide - Gross Negligence" = "90B",
+      "Liquor Law Violations" = "90G",
+      "Motor Vehicle Theft" = "240",
+      "Narcotic / Drug Law Violations" = "35A",
+      "Offenses Against Family and Children" = "90F",
+      "Other Assaults" = "13B",
+      "Prostitution and Commercialized Vice" = "40A",
+      "Public Drunkenness" = "90E",
+      "Rape" = "11A",
+      "Receiving Stolen Property" = "280",
+      "Robbery Firearm" = "12U",
+      "Robbery No Firearm" = "12U",
+      "Theft from Vehicle" = "23F",
+      "Thefts" = "23U",
+      "Vagrancy/Loitering" = "90B",
+      "Vandalism/Criminal Mischief" = "290",
+      "Weapon Violations" = "520",
+      .default = NA_character_
+    )
+  ) %>% 
+  left_join(read_csv(here::here("analysis_data/nibrs_categories.csv")), 
+            by = "nibrs_offense_code") %>% 
+  # add city name
+  mutate(city_name = "Philadelphia, PA") %>% 
+  # select core variables
+  select(one_of(common_vars)) %>% 
+  # save data
+  write_rds(here::here("analysis_data/crime_data_philadelphia.rds"),
+            compress = "gz")
+
+
+
+# process Phoenix data
+# https://phoenixopendata.com/dataset/crime-data/resource/0ce3411a-2fc6-4302-a33f-167f68608a20
+here::here("original_data/raw_phoenix.csv") %>% 
+  read_csv(col_types = cols(.default = col_character())) %>% 
+  janitor::clean_names() %>% 
+  # add date variable
+  add_date_var("occurred_on", "mdY HM", "America/Phoenix") %>% 
+  # add year variable and remove offenses before start date
+  filter_by_year(yearFirst, yearLast) %>%
+  # identify location types
+  left_join(
+    read_csv("analysis_data/location_types_phoenix.csv",
+             col_types = cols(.default = col_character())),
+    by = "premise_type"
+  ) %>% 
+  # categorise offences
+  mutate(
+    nibrs_offense_code = case_when(
+      ucr_crime_category == "AGGRAVATED ASSAULT" ~ "13A",
+      ucr_crime_category == "ARSON" ~ "200",
+      ucr_crime_category == "BURGLARY" & location_type == "residence" ~ "22A",
+      ucr_crime_category == "BURGLARY" ~ "22B",
+      ucr_crime_category == "DRUG OFFENSE" ~ "35A",
+      ucr_crime_category == "LARCENY-THEFT" ~ "23U",
+      ucr_crime_category == "MOTOR VEHICLE THEFT" ~ "240",
+      ucr_crime_category == "MURDER AND NON-NEGLIGENT MANSLAUGHTER" ~ "09A",
+      ucr_crime_category == "RAPE" ~ "11A",
+      ucr_crime_category == "ROBBERY" ~ "120",
+      TRUE ~ NA_character_
+    )
+  ) %>% 
+  left_join(read_csv(here::here("analysis_data/nibrs_categories.csv")), 
+            by = "nibrs_offense_code") %>% 
+  # add city name
+  mutate(city_name = "Phoenix, AZ") %>% 
+  # select core variables
+  select(one_of(common_vars)) %>% 
+  # save data
+  write_rds(here::here("analysis_data/crime_data_phoenix.rds"), compress = "gz")
+
+
+
+# process Sacramento data
+# http://data.cityofsacramento.org/search?q=crime%20data
+dir("original_data", pattern = "raw_sacramento", full.names = TRUE) %>% 
+  map_dfr(read_csv, col_types = cols(.default = col_character())) %>% 
+  janitor::clean_names() %>% 
+  # add date variable
+  add_date_var("occurence_date", "Ymd T", "America/Los_Angeles") %>% 
+  # add year variable and remove offenses before start date
+  filter_by_year(yearFirst, yearLast) %>% 
+  # categorise offences
+  left_join(read_csv(here::here("analysis_data/categories_sacramento.csv")),
+            by = c("offense_category", "description")) %>% 
+  left_join(read_csv(here::here("analysis_data/nibrs_categories.csv")), 
+            by = "nibrs_offense_type") %>% 
+  # add city name
+  mutate(city_name = "Sacramento, CA") %>% 
+  # select core variables
+  select(one_of(common_vars)) %>% 
+  # save data
+  write_rds(here::here("analysis_data/crime_data_sacramento.rds"),
+            compress = "gz")
+
+  
 
 # process San Francisco data
 list(
@@ -1336,12 +1693,34 @@ list(
   join_nibrs_cats(here::here("analysis_data/categories_san_francisco.csv"),
                   by = c('incident_category', 'incident_description')) %>% 
   # add city name
-  mutate(city_name = "San Francisco") %>% 
+  mutate(city_name = "San Francisco, CA") %>% 
   # select core variables
   select(one_of(common_vars)) %>% 
   # save data
   write_rds(here::here("analysis_data/crime_data_san_francisco.rds"),
             compress = "gz")
+
+
+
+# process Tucson data
+# http://gisdata.tucsonaz.gov/search?groupIds=b6a49faa168647d8b56e1a06bd53600f&sort=-modified&tags=police
+dir(path = here::here("original_data"), pattern = '^raw_tucson_', 
+    full.names = TRUE) %>% 
+  map_dfr(read_csv, col_types = cols(.default = col_character())) %>% 
+  janitor::clean_names() %>% 
+  # add date variable
+  add_date_var("date_occu", "Ymd T", "America/Phoenix") %>% 
+  # add year variable and remove offenses before start date
+  filter_by_year(yearFirst, yearLast) %>% 
+  # join NIBRS categories
+  join_nibrs_cats("analysis_data/categories_tucson.csv",
+                  by = 'statutdesc') %>% 
+  # add city name
+  mutate(city_name = "Tucson, AZ") %>% 
+  # select core variables
+  select(one_of(common_vars)) %>% 
+  # save data
+  write_rds(here::here("analysis_data/crime_data_tucson.rds"), compress = "gz")
 
 
 
