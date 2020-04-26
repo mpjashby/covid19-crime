@@ -35,24 +35,23 @@ if (!file.exists(here::here("analysis_data/crime_models.RData"))) {
     model(arima = ARIMA(crimes ~ trend() + season() + holidays))
   
   # save models
-  # write_rds(crime_models, here::here("analysis_data/crime_models.rds"))
   save(crime_models, file = here::here("analysis_data/crime_models.RData"))
   
 } else {
   
   # load existing models
-  # crime_models <- read_csv(here::here("analysis_data/crime_models.rds"))
   load(here::here("analysis_data/crime_models.RData"))
   
 }
 
+# generate data for forecasts
 forecast_data <- expand.grid(
   city_name = unique(crime_counts$city_name),
   category = unique(crime_counts$category),
   date = seq.Date(
     ymd("2020-01-20"), 
     ymd("2020-01-20") + 
-      weeks(as.integer(difftime(now(), ymd("2020-01-20"), units = "weeks")) + 2), 
+      weeks(as.integer(difftime(now(), ymd("2020-01-20"), units = "weeks")) + 1), 
     by = "days"
   ),
   stringsAsFactors = FALSE
@@ -68,7 +67,6 @@ forecast_data <- expand.grid(
 
 # generate forecasts
 crime_forecasts <- forecast(crime_models, forecast_data)
-# h = glue::glue("{as.integer(difftime(now(), ymd('2020-01-20'), units = 'weeks')) + 2} weeks")
 
 # save forecasts
 write_rds(crime_forecasts, here::here("analysis_data/crime_forecasts.rds"))

@@ -5,7 +5,9 @@
 # remotes::install_github("tidyverts/fabletools")
 
 # load packages
+library("COVID19")   # case data
 library("fable")     # time series analysis
+library("ggrepel")   # repel labels in ggplots
 library("httr")      # download files
 library("lubridate") # handle dates
 library("tsibble")   # time series data
@@ -144,16 +146,6 @@ check_nibrs_cats <- function (data, file, by) {
     sum(is.na(data$nibrs_crime_against)) > 0
   ) {
     cat("✖ some cases could not be matched to NIBRS categories\n")
-    # data %>% filter(
-    #   is.na(data$nibrs_offense_code) |
-    #     is.na(data$nibrs_offense_type) |
-    #     is.na(data$nibrs_offense_category) |
-    #     is.na(data$nibrs_crime_against)
-    # ) %>% 
-    #   group_by_at(vars(one_of(c(by, "date_year")))) %>% 
-    #   summarise(n = n()) %>% 
-    #   spread(date_year, n) %>% 
-    #   write_csv(paste0(file, "_failures.csv"))
   } else {
     cat("✔︎ All cases matched to NIBRS categories\n")
   }
@@ -162,4 +154,19 @@ check_nibrs_cats <- function (data, file, by) {
   
 }
 
-
+# Convert small integers to text
+number_to_text <- function (x, ...) {
+  
+  if (length(x) != 1 | !is.numeric(x)) {
+    stop("number_to_text() can only convert a single number")
+  }
+  
+  if (x == round(x) & x >= 0 & x <= 10) {
+    dplyr::recode(x, `1` = "one", `2` = "two", `3` = "three", `4` = "four",
+                  `5` = "five", `6` = "six", `7` = "seven", `8` = "eight",
+                  `9` = "nine", `10` = "ten")
+  } else {
+    scales::comma(x, ...)
+  }
+  
+}

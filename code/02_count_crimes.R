@@ -49,7 +49,8 @@ crime_data %>%
     holidays = sum(holiday)
   ) %>% 
   ungroup() %>% 
-  mutate(crimes_per_day = crimes / days_in_week) %>% 
+  # remove incomplete weeks
+  filter(days_in_week == 7) %>% 
   # export data
   write_rds(here::here("analysis_data/crime_counts.rds")) %>% 
   group_by(city_name) %>%
