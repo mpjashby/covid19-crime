@@ -1,0 +1,860 @@
+---
+title             : "Initial evidence on the relationship between the coronavirus pandemic and crime in the United States"
+shorttitle        : "Coronavirus pandemic and crime in the United States"
+
+author: 
+  - name          : "Matthew P J Ashby"
+    affiliation   : "1"
+    corresponding : yes    # Define only one corresponding author
+    address       : "35 Tavistock Square, London WC1H 9EZ"
+    email         : "matthew.ashby@ucl.ac.uk"
+
+affiliation:
+  - id            : "1"
+    institution   : "Jill Dando Institute of Security and Crime Science, University College London"
+
+abstract: |
+  The COVID-19 pandemic led to substantial changes in the daily activities of 
+  millions of Americans, with many businesses and schools closed, public events 
+  cancelled and states introducing stay-at-home orders. This article used 
+  police-recorded open crime data to understand how the frequency of common 
+  types of crime changed in 16 large cities across the United States in the 
+  early months of 2020. Seasonal auto-regressive integrated moving average 
+  (SARIMA) models of crime in previous years were used to forecast the expected 
+  frequency of crime in 2020 in the absence of the pandemic. The forecasts from 
+  these models were then compared to the actual frequency of crime during the 
+  early months of the pandemic. There were no significant changes in the 
+  frequency of serious assaults in public or (contrary to the concerns of policy 
+  makers) any change to the frequency of serious assaults in residences. In some 
+  cities, there were reductions in residential burglary but little change in 
+  non-residential burglary. Thefts of motor vehicles decreased in some cities
+  while there were diverging patterns of thefts from motor vehicles. These 
+  results are used to make suggestions for future research into the 
+  relationships between the coronavirus pandemic and different crimes.
+  
+keywords          : "COVID-19, coronavirus, crime, crime trends"
+wordcount         : "`r scales::comma(wordcountaddin::word_count() - 201)`"
+
+bibliography      : "../../bibliography.bib"
+# csl               : "../../springer-basic-author-date.csl"
+
+floatsintext      : no
+figurelist        : no
+tablelist         : no
+footnotelist      : no
+linenumbers       : no
+mask              : no
+draft             : no
+
+documentclass     : "apa6"
+classoption       : "man"
+output            : papaja::apa6_word
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, include = FALSE, cache = TRUE)
+
+library("bookdown")
+
+source(here::here("code/00_initialise.R"))
+```
+
+```{r load data}
+# specify excluded combinations
+excluded_combinations <- tribble(
+  ~category, ~city_name,
+  "serious assaults in public", "Chicago, IL",
+  "serious assaults in residences", "Chicago, IL",
+  "residential burglary", "Dallas, TX",
+  "non-residential burglary", "Boston, MA",
+  "non-residential burglary", "Dallas, TX",
+  "theft of vehicle", "Boston, MA",
+  "theft of vehicle", "Dallas, TX",
+  "theft of vehicle", "Nashville, TN",
+  "theft from vehicle", "Boston, MA",
+  "theft from vehicle", "Dallas, TX",
+  "theft from vehicle", "Nashville, TN"
+) %>% 
+  mutate(excluded_combination = TRUE)
+
+# load crime counts
+crime_counts <- here::here("analysis_data/crime_counts.rds") %>% 
+  read_rds() %>% 
+  left_join(excluded_combinations, by = c("category", "city_name")) %>% 
+  filter(is.na(excluded_combination)) %>% 
+  select(-excluded_combination) %>% 
+  mutate(week = as_date(week)) %>%
+  as_tsibble(key = c(city_name, category), index = week)
+
+# load crime models
+load(here::here("analysis_data/crime_models.RData"))
+
+# identify cities that have updated their crime data recently
+current_cities <- crime_counts %>% 
+  as_tibble() %>% 
+  group_by(city_name) %>% 
+  # find date of most-recent crime in the data for each city
+  summarise(last_date = max(week)) %>% 
+  # filter(last_date >= as_date(yearweek(today() - weeks(2)))) %>%
+  filter(last_date >= ymd("2020-04-06")) %>%
+  pull("city_name")
+
+# exclude cities that have not recently updated their crime data, and remove
+# current week from data (although it shouldn't be there anyway)
+crime_counts <- filter(
+  crime_counts, 
+  city_name %in% current_cities,
+  yearweek(week) < yearweek(today())
+)
+  
+# load crime forecasts
+crime_forecasts <- read_rds(here::here("analysis_data/crime_forecasts.rds")) %>% 
+  # exclude cities that have not recently updated their crime data
+  filter(city_name %in% current_cities) %>% 
+  left_join(excluded_combinations, by = c("category", "city_name")) %>% 
+  filter(is.na(excluded_combination)) %>% 
+  select(-excluded_combination)
+
+# get cases and deaths
+national_cases <- ungroup(covid19(level = 1, start = "2020-01-19"))
+global_cases <- national_cases %>% 
+  group_by(date) %>% 
+  summarise(
+    deaths = sum(deaths, na.rm = TRUE), 
+    confirmed = sum(confirmed, na.rm = TRUE)
+  ) %>% 
+  ungroup()
+us_cases <- covid19(ISO = "US", level = 1, start = "2020-01-19") %>% 
+  ungroup() %>% 
+  mutate(
+    roll_cases = zoo::rollmean(confirmed, k = 7, na.pad = TRUE)
+  )
+state_cases <- ungroup(covid19(ISO = "US", level = 2, start = "2020-01-19"))
+
+which_state <- tribble(
+  ~city_name, ~state,
+  "Atlanta, GA", "Georgia",
+  "Austin, TX", "Texas",
+  "Baltimore, MD", "Maryland",
+  "Boston, MA", "Massachusetts",
+  "Chicago, IL", "Illinois",
+  "Dallas, TX", "Texas",
+  "Los Angeles, CA", "California",
+  "Louisville, KY", "Kentucky",
+  "Memphis, TN", "Tennessee",
+  "Minneapolis, MN", "Minnesota",
+  "Montgomery County, MD", "Maryland",
+  "Nashville, TN", "Tennessee",
+  "Philadelphia, PA", "Pennsylvania",
+  "Phoenix, AZ", "Arizona",
+  "Sacramento, CA", "California",
+  "San Francisco, CA", "California",
+  "Tucson, AZ", "Arizona",
+  "Washington, DC", "DC"
+)
+```
+
+```{r get lockdown dates}
+lockdowns <- tribble(
+  ~city_name, ~measure_type, ~measure_date, ~source,
+  "Atlanta, GA", "schools closed", "2020-03-16",
+    "https://drive.google.com/file/d/1jv5te2vftONDcQw5aoFIQWImU-I-Ykvu/view",
+  "Atlanta, GA", "stay at home", "2020-03-24", 
+    "https://www.atlantaga.gov/Home/ShowDocument?id=45508",
+  "Austin, TX", "schools closed", "2020-03-13",
+    "https://www.austinisd.org/announcements/2020/03/13/important-message-mensaje-importante",
+  "Austin, TX", "stay at home", "2020-03-25",
+    "http://austintexas.gov/article/stay-home-work-safe-order-information",
+  "Baltimore, MD", "schools closed", "2020-03-16", 
+    "https://www.baltimorecityschools.org/health-updates",
+  "Baltimore, MD", "stay at home", "2020-03-23", 
+    "https://governor.maryland.gov/2020/03/23/governor-hogan-announces-closure-of-all-non-essential-businesses-175-million-relief-package-for-workers-and-small-businesses-affected-by-covid-19/",
+  "Boston, MA", "schools closed", "2020-03-17", 
+    "https://www.bostonpublicschools.org/cms/lib/MA01906464/Centricity/Domain/294/2020-3-13%20Closure%20Notice.pdf",
+  "Boston, MA", "stay at home", "2020-03-23", 
+    "https://www.bostonpublicschools.org/coronavirus",
+  "Chicago, IL", "schools closed", "2020-03-17", 
+    "https://cps.edu/oshw/Pages/HealthyCPS.aspx",
+  "Chicago, IL", "stay at home", "2020-03-21", 
+    "https://www.chicago.gov/city/en/depts/mayor/press_room/press_releases/2020/march/StayAtHomeOrder.html",
+  "Dallas, TX", "schools closed", "2020-03-16",
+    "https://www.nbcdfw.com/news/coronavirus/dallas-isd-closes-schools-indefinitely-in-effort-to-slow-covid-19/2331774/",
+  "Dallas, TX", "stay at home", "2020-03-24", 
+    "https://www.dallascounty.org/Assets/uploads/docs/judge-jenkins/covid-19/03242020-AmendedOrder-FINAL.pdf",
+  "Los Angeles, CA", "schools closed", "2020-03-16", 
+    "https://achieve.lausd.net/site/default.aspx?PageType=3&DomainID=4&ModuleInstanceID=4466&ViewID=6446EE88-D30C-497E-9316-3F8874B3E108&RenderLoc=0&FlexDataID=86736&PageID=1",
+  "Los Angeles, CA", "stay at home", "2020-03-19",
+    "https://www.lamayor.org/sites/g/files/wph446/f/article/files/SAFER_AT_HOME_ORDER2020.03.19.pdf",
+  "Louisville, KY", "schools closed", "2020-03-16", 
+    "https://twitter.com/JCPSKY/status/1238228959101431814?s=20",
+  "Louisville, KY", "stay at home", "2020-03-25", 
+    "https://governor.ky.gov/attachments/20200325_Executive-Order_2020-257_Healthy-at-Home.pdf",
+  "Memphis, TN", "schools closed", "2020-03-12", 
+    "https://www.scsk12.org/coronavirusfacts/",
+  "Memphis, TN", "stay at home", "2020-03-24", 
+    "https://covid19.memphistn.gov/safer-at-home/",
+  "Minneapolis, MN", "schools closed", "2020-03-18", 
+    "https://mn.gov/governor/assets/EO%2020-02%20Final_tcm1055-423084.pdf",
+  "Minneapolis, MN", "stay at home", "2020-03-27", 
+    "https://mn.gov/governor/assets/3a.%20EO%2020-20%20FINAL%20SIGNED%20Filed_tcm1055-425020.pdf",
+  "Montgomery County, MD", "schools closed", "2020-03-13", 
+    "https://www.montgomeryschoolsmd.org/departments/publicinfo/community/school-year-2019-2020/coronavirus-update-20200312.html",
+  "Montgomery County, MD", "stay at home", "2020-03-23", 
+    "https://governor.maryland.gov/2020/03/23/governor-hogan-announces-closure-of-all-non-essential-businesses-175-million-relief-package-for-workers-and-small-businesses-affected-by-covid-19/",
+  "Nashville, TN", "schools closed", "2020-03-12", 
+    "https://news.mnps.org/metro-schools-closed-through-april-3/",
+  "Nashville, TN", "stay at home", "2020-03-15", 
+    "https://www.asafenashville.org/wp-content/uploads/2020/03/Directors-Order-3-Safer-At-Home.pdf",
+  "Philadelphia, PA", "schools closed", "2020-03-13",
+    "https://twitter.com/PHLschools/status/1238533293831852036?s=20",
+  "Philadelphia, PA", "stay at home", "2020-03-23", 
+    "https://www.inquirer.com/health/coronavirus/coronavirus-covid-19-philadelphia-stay-at-home-order-20200322.html",
+  "Phoenix, AZ", "schools closed", "2020-03-15", 
+    "https://phxschools.org/update/",
+  "Phoenix, AZ", "stay at home", "2020-03-30",
+    "https://azgovernor.gov/governor/news/2020/03/stay-home-stay-healthy-stay-connected",
+  "Sacramento, CA", "schools closed", "2020-03-16", 
+    "https://www.scusd.edu/e-connections-post/sacramento-public-schools-superintendent-and-school-board-order-limited-district",
+  "Sacramento, CA", "stay at home", "2020-03-19", 
+    "https://www.sacbee.com/news/coronavirus/article241332696.html",
+  "San Francisco, CA", "schools closed", "2020-03-16", 
+    "https://www.sfusd.edu/announcements/2020-03-12-all-sfusd-schools-closed-march-16-through-april-3",
+  "San Francisco, CA", "stay at home", "2020-03-16", 
+    "https://www.sfdph.org/dph/alerts/files/HealthOrderC19-07-%20Shelter-in-Place.pdf",
+  "Tucson, AZ", "schools closed", "2020-03-16", 
+    "http://www.tusd1.org/Portals/TUSD1/District/docs/Announcements/SuperintendentLetterFamilies031720.pdf",
+  "Tucson, AZ", "stay at home", "2020-03-30",
+    "https://azgovernor.gov/governor/news/2020/03/stay-home-stay-healthy-stay-connected",
+  "Washington, DC", "schools closed", "2020-03-16", 
+    "https://coronavirus.dc.gov/release/mayor-bowser-adjusts-district-columbia-government’s-operating-status",
+  "Washington, DC", "stay at home", "2020-04-01",
+    "https://dc.gov/release/mayor-bowser-issues-stay-home-order"
+) %>% 
+  mutate(measure_date = ymd(measure_date))
+
+events <- lockdowns %>%
+  # filter(city_name %in% unique(chart_data_assault_public$city_name)) %>% 
+  select(-source) %>% 
+  pivot_wider(names_from = "measure_type", values_from = "measure_date") %>% 
+  left_join(which_state, by = "city_name") %>% 
+  mutate(`first US case` = ymd("2020-01-20")) %>% 
+  select(-state) %>% 
+  pivot_longer(-city_name, names_to = "measure_type", 
+               values_to = "measure_date", values_drop_na = TRUE) %>%
+  mutate(label = recode(
+    measure_type,
+    "first US case" = "F",
+    "schools closed" = "S",
+    "stay at home" = "H"
+  )) %>% 
+  group_by(city_name, measure_date) %>% 
+  summarise(label = paste(label, collapse = ", "))
+
+```
+
+
+```{r create chart functions}
+
+process_chart_data <- function (forecasts, counts, categories, excluded = "") {
+  
+  forecasts %>% 
+    filter(category %in% categories, !city_name %in% excluded) %>% 
+    # extract confidence intervals
+    mutate(
+      ci95 = hilo(.distribution, level = 99),
+      lower95 = map_dbl(ci95, pluck, 1),
+      upper95 = map_dbl(ci95, pluck, 2)
+    ) %>% 
+    as_tibble() %>% 
+    select(-.model, -ci95, -.distribution) %>% 
+    rename(estimate = crimes) %>% 
+    # join actual counts
+    full_join(
+      select(
+        filter(counts, week >= ymd("2020-01-01"), category %in% categories, 
+               !city_name %in% excluded), 
+        city_name, category, week, crimes
+      ),
+      by = c("city_name", "category", "week")
+    ) %>% 
+    # determine if counts are outside confidence intervals
+    mutate(sig = crimes > upper95 | crimes < lower95) %>% 
+    replace_na(replace = list(sig = FALSE)) %>% 
+    # restrict CIs to positive numbers
+    mutate_at(vars(one_of("lower95", "upper95")), ~ ifelse(. < 0, 0, .)) %>% 
+    arrange(city_name, category, week) %>% 
+    # label last point in each time series
+    group_by(city_name, category) %>% 
+    mutate(
+      label = ifelse(
+        !is.na(crimes) & is.na(lead(crimes)),
+        scales::percent((crimes - estimate) / estimate, accuracy = 1),
+        NA_character_
+      ),
+      # if label is positive, add a + symbol
+      label = ifelse(str_detect(label, "-"), str_glue("  {label}"),
+                     str_glue("  +{label}"))
+    ) %>% 
+    ungroup()
+  
+}
+
+plot_chart <- function (chart_data, event_data) {
+  
+  ggplot(chart_data) +
+    # print line to highlight zero on the x axis
+    geom_hline(aes(yintercept = 0), size = 0.25, colour = "grey50") +
+    # print line showing CI around estimate
+    geom_ribbon(
+      aes(x = week, ymin = lower95, ymax = upper95), 
+      na.rm = TRUE, fill = "grey90"
+    ) +
+    # print line showing estimate of crimes
+    geom_line(aes(x = week, y = estimate), na.rm = TRUE, colour = "grey60",
+              linetype = "32") +
+    # print lines showing key dates
+    geom_vline(
+      aes(xintercept = measure_date), 
+      data = filter(event_data, city_name %in% unique(chart_data$city_name)),
+      na.rm = TRUE, size = 0.25, colour = "grey50"
+    ) +
+    # print line showing count of crimes
+    geom_line(aes(x = week, y = crimes), na.rm = TRUE, colour = "black") +
+    # print points with fill denoting whether value is in/out of the CI
+    geom_point(aes(x = week, y = crimes, fill = sig), na.rm = TRUE, 
+               shape = 21) +
+    # overprint points before the first US case in white, since there are no CIs
+    # before 20 Jan
+    geom_point(aes(x = week, y = crimes), 
+               data = filter(chart_data, week < ymd("2020-01-20")), 
+               na.rm = TRUE, fill = "white", shape = 21) +
+    geom_text(aes(x = week, y = crimes, label = label), na.rm = TRUE, 
+              size = chart_elements$label_text_size, hjust = 0, nudge_x = 1) +
+    geom_label(
+      aes(x = measure_date, y = 0, label = label),
+      data = filter(event_data, city_name %in% unique(chart_data$city_name)), 
+      inherit.aes = FALSE, size = 7 / (14 / 5), 
+      label.padding = unit(0.1, "lines"), label.size = NA, vjust = 1
+    ) +
+    scale_x_date(date_breaks = "2 weeks", date_labels = "%d\n%b", 
+                 expand = expansion(mult = c(0.02, 0))) +
+    scale_y_continuous(n.breaks = 3, limits = c(0, NA), 
+                       expand = expansion(mult = c(0.25, 0.05))) +
+    scale_fill_manual(
+      values = c(`FALSE` = "grey90", `TRUE` = "black"),
+      labels = c(
+        `FALSE` = "actual crime count is within 99% confidence interval of estimate",
+        `TRUE` = "actual crime count is outside 99% confidence interval of estimate"
+      )
+    ) +
+    facet_wrap(vars(city_name), scales = "free_y", ncol = 2) +
+    # facet_grid(vars(city_name), scales = "free_y", 
+    #            labeller = label_wrap_gen(width = 10)) +
+    coord_cartesian(clip = "off") +
+    labs(
+      caption = "F = first US case   S = schools closed   H = stay-at-home/shelter-in-place order",
+      x = NULL,
+      y = "crimes per week",
+      fill = NULL,
+      linetype = NULL
+    ) +
+    theme_ashby() +
+    theme(
+      plot.caption = element_text(hjust = 0.5), 
+      legend.direction = "vertical"
+    )
+  
+}
+
+```
+
+
+<!-- Word count: `r scales::comma(wordcountaddin::word_count())` -->
+
+
+# Introduction
+
+The current coronavirus pandemic is drastically altering many aspects of life around the world. This article outlines initial evidence on how crime is changing, using data from a group of large cities in the United States. This evidence is necessarily limited and it will be possible to understand more detail as the pandemic progresses and more data become available. Nevertheless it is likely to be useful to consider the available evidence now, both to help the development of research questions and data collection for further research, and to provide the best-available evidence on a topic of substantial public interest.
+
+The first cases of the COVID-19 disease caused by the novel coronavirus SARS-CoV-2 were reported in the city of Wuhan, China in December 2019. The first case in the United States was reported on 20 January 2020 in the suburbs of Seattle, Washington [@Holshue2020]. Within a week, cases had been reported in Illinois, Arizona and California, and then in every state except Wyoming by 18 March [@Dong2020]. By `r strftime(max(us_cases$date), "%e %B %Y")`, there had been about `r scales::comma(pull(filter(us_cases, date == max(date)), "confirmed"), accuracy = 1000)` reported cases of coronavirus in the United States (see Figure 1) and `r scales::comma(pull(filter(us_cases, date == max(date)), "deaths"))` people had died.
+
+Local, state and federal agencies responded to the pandemic with measures designed to slow the spread of disease and minimize the intensity of peak demand for potentially scarce healthcare resources [@US-Department-of-Health-and-Human-Services:2020aa]. One of the main mechanisms for achieving these goals was 'social distancing', i.e. reducing person-to-person transfer of the virus by minimizing the circumstances in which people were in close contact with one another [@Qualls2017]. This was done by closing schools, cancelling public events (including almost all sports and public entertainment) and advising or ordering people to stay home except for essential trips. California became the first to issue a state-wide stay-at-home order on 19 March, with Illinois, New Jersey and New York following over the next three days. Thirty-four more states issued similar orders within the following two weeks [@Mervosh:2020aa], during which time all 50 states had ordered or recommended school closures [@Education-Week:2020aa]. 
+<!-- One notable feature of the governmental response was the "patchwork" of measures implemented by different states at different times [@Cornwall:2020aa]. -->
+
+<!-- There are many reasons why the pandemic may be related to changes in crime. It may, for example, have created new opportunities for identity theft or counterfeiting medical products. Perhaps the greatest influence may come from the large-scale changes to people's daily activities.  -->
+Patterns of activity during the pandemic were likely to be different from normal for at least three reasons. First, some people's activities were directly affected by the virus, e.g. because they were sick or caring for those who were. Second, activities may have been affected by people's fear of infection, especially those who have underlying medical conditions that put them at greater risk. Third, a great many people's activities will have been influenced by government actions to slow the spread of the virus.
+
+<!-- In many states, restaurants and non-essential shops are closed as well as schools, colleges and many offices.  -->
+<!-- Data from the booking website @OpenTable:2020ab show that in comparison to the same day of previous year, restaurant bookings in the US had fallen by 50% by 16 March and by 100% by 21 March. Similarly, data  -->
+Data from the location tracking service @Foursquare:2020aa show that by late March visits to shopping malls, clothing stores, gyms, bars, restaurants, airports and hotels had all fallen by more than 50% compared to mid February, while visits to offices had fallen 37%. Conversely, people were likely to be spending more time at home, since children were not at school, many service-sector employees were furloughed and employers encouraged staff to work from home. Some public places also stand out as becoming busier during the early weeks of the pandemic: @Foursquare:2020aa data show increases in visits to grocery, hardware, liquor and drug stores beginning in early March. The same source also shows increases in visits to parks and hiking trails, although this may a seasonal effect as winter gave way to spring.
+
+The routine activities approach [@Cohen:1979mi] can be used to understand relationships between crime and people's daily activities. For a crime to occur, one or more motivated offenders must come into contact with a suitable target in the absence of controllers (guardians of targets, managers of places and handlers of offenders) who make committing the crime more difficult [for a recent description of this framework, see @Eck:2015aa]. For example, a purse-snatching in a public park requires not only that a purse and a purse-snatcher be in the same place at the same time, but that other park-goers (potential target guardians) do not intervene, that the park authorities (place managers) have not taken steps to create an environment that makes purse-snatching more difficult, and that the offender's girlfriend (a potential offender handler) has not dissuaded them from offending by threatening to end the relationship if they do.
+
+The coronavirus pandemic may have changed activities of each of these actors in different ways. Fewer people on the street may have meant fewer targets for street robbery, but also fewer guardians. More people in grocery stores may mean more potential shoplifters, but queuing systems and more staff refilling depleted shelves may have led to more-active place management. Social distancing advice to keep 6-feet apart from others may have made pick-pocketing almost impossible, while only having minor effects on other types of crime. The rapid development and complexity of changes to large parts of daily life mean predicting the direction or magnitude of any changes in crime is difficult.
+
+
+## Existing evidence
+
+To the author's knowledge, there are no published empirical studies on the influence of crime on previous epidemics such as the 1918 influenza pandemic or the outbreaks of severe acute respiratory syndrome (SARS) in 2002–04 or Middle East respiratory syndrome (MERS) since 2012. There are, however, other potential sources of evidence on how crime changes during sudden and widespread changes to routine activities.
+
+Several scholars have studied changes in crime during and after natural disasters, particularly Atlantic hurricanes [@Elmes2014]. Disasters cause widespread changes to routine activities through deaths, evacuations and disruption of working and leisure patterns, as well as through damage to the physical environment. @Lebeau2002 and @Frailing2017 found increases in burglaries in the immediate aftermath of hurricanes in the United States, possibly due to more properties being unattended if residents have evacuated or been hospitalized [@Leitner2011a]. Studies of New Orleans after Hurricane Katrina found an increase in homicide, possibly due to the disruption and subsequent informal reorganization of drug markets [@Frailing2017]. However, @Roman2007 found that violence more generally in New Orleans actually fell after Katrina, before rising to a higher level than before the hurricane. @Leitner2011 found that violence was broadly stable in other Louisiana parishes hit by the storm. @Varano2010 studied violent and non-violent crime rates in cities that hosted large numbers of Katrina evacuees and found no widespread or pervasive changes. @Prelog2016, studying associations between crime and the frequency and severity of natural disasters at the county level, found disasters were associated with higher property crime but no change in violence. For further discussion of crime in the context of natural disasters, see @Frailing2017.
+
+Another potential source of evidence comes from changes in crime associated with the large-scale changes in routine activities caused by major sporting events. These affect routine activities by bringing large numbers of people into the event area, disrupting traffic and public transport, and gathering people to watch the event on television. As with crime during natural disasters, studies of crime during major events have produced mixed results. @Campaniello2013 found that the football World Cup was associated with increases across several types of property crime (including burglary and pick-pocketing), while @Kurland2014 concluded large football matches at Wembley Stadium in London were associated with increases in both violent crime and theft in the immediate area. However, @Breetzke2013 found no city-wide increase in violence associated with football matches and no increase in burglary even in the neighborhood of the stadium. @Baumann2012 reported that a city hosting the Olympic Games was associated with a 10% increase in property crime, but hosting the Super Bowl was associated with a 2.5% decrease in violence. For a recent discussion of crime associated with major sporting events, see @Piquero2019.
+
+The coronavirus pandemic is different in nature to the natural disasters and sporting events analyzed by previous researchers. In particular, a pandemic is a 'slow-onset' emergency that emerges over time and then varies in its impact [@OCHA2011]. It is also different in that, unlike a hurricane or tornado, coronavirus has left the physical environment largely untouched. It has not, for example, destroyed buildings or cut off electricity. Instead, the changes caused by the pandemic have largely related to human activity. 
+
+The goal of this study was to make an initial estimate of how the frequency of different types of crime changed during the coronavirus pandemic. Given the evolving nature of the situation, the complexity of potential interactions between actors in the routine activities framework and the lack of any previous research on crime during pandemics, this study did not attempt to test specific hypotheses but to explore how crime varied throughout the early months of the pandemic.
+
+
+# Data and methods
+
+This report uses data from `r length(unique(crime_forecasts$city_name))` large cities or urban counties in the United States: `r vector_to_text(unique(crime_forecasts$city_name))` ^[Montgomery County -- just outside Washington, DC -- is not a single city, but a suburban county with a comparable population and a single county-wide police department.]. These cities were chosen because they all provide public access to an incident-level extract of police-recorded crime data that is updated at least weekly. This allows monitoring of emerging crime trends that would be obscured in annual crime statistics bulletins produced by many agencies. Open crime data have some limitations [@Ashby:2019aa] but have been used successfully in previous research on crime trends [@Tompson2014].
+
+The complex interactions of targets, offenders and controllers mean it is likely that the COVID-19 pandemic may have different relationships with different types of crime. To increase the robustness of the results, this study focused on crime types which are known to be both relatively likely to be reported to police and relatively unaffected by variations in police recording practices. These types were:
+
+  1. *Serious assaults in public places* including homicides and aggravated assaults in commercial, leisure, retail and transportation settings as well as in public open spaces and streets.
+  2. *Serious assaults in residences* including homicides and aggravated assaults in houses, apartments etc but excluding institutional residential settings such as hospitals, hotels and prisons.
+  3. *Residential burglaries* (excluding auto burglaries) occurring in residences, excluding institutional residences.
+  4. *Non-residential burglaries* (excluding auto burglaries) occurring anywhere other than a residence.
+  5. *Theft of vehicles*
+  6. *Theft from vehicles* including auto burglaries and thefts of auto parts.
+<!-- 7. *Personal robberies* including (due to data limitations) home invasions, although these are relatively rare in comparison to street robberies. -->
+
+```{r calculate median weekly change in crime}
+# this code calculates the proportion of weeks in which burglary and serious 
+# assault changed by greater than or equal to 18%
+crime_changes <- crime_counts %>% 
+  filter(week <= ymd("2020-01-01")) %>% 
+  as_tibble() %>% 
+  mutate(
+    category = recode(category, "residential burglary" = "burglary", 
+                      "non-residential burglary" = "burglary", 
+                      "serious assaults in public" = "serious assault", 
+                      "serious assaults in residences" = "serious assault")
+  ) %>% 
+  filter(category %in% c("burglary", "serious assault")) %>% 
+  group_by(city_name, category, week) %>% 
+  summarise(crimes = sum(crimes)) %>% 
+  ungroup() %>% 
+  group_by(category) %>% 
+  mutate(
+    abs_perc = abs((crimes - lag(crimes)) / lag(crimes)),
+    gt = abs_perc >= 0.18
+  ) %>% 
+  summarise(prop = mean(gt, na.rm = TRUE))
+```
+
+Understanding relationships between COVID-19 and crime requires some estimate of how much crime would be expected to occur in the absence of the pandemic. This is difficult because so many factors influence how much crime occurs. A number of media outlets have attempted to understand changes in crime during the pandemic by making week-to-week or year-on-year comparisons of weekly or monthly crime counts. However, these comparisons risk drawing false conclusions because they ignore long-term trends (which affect year-on-year comparisons) and seasonal variations (which complicate week to week comparisons). Perhaps most importantly, these comparisons take no account of random variation, even though crime counts over short periods typically show a relatively large amount of statistical noise [@Gorr2003b]. For example, on 27 March *The Washington Post* reported that both burglaries and assaults in New York City had dropped by 18% compared to the previous week [@Jacobs:2020aa]. But across the `r length(unique(crime_forecasts$city_name))` cities for which data were available for the current study, the absolute week-to-week change in burglary was greater than 18% in an average of `r round(pluck(filter(crime_changes, category == "burglary"), "prop") * 52)` weeks each year between 2016 and 2019 and the absolute change in serious assaults greater than 18% in an average of `r round(pluck(filter(crime_changes, category == "serious assault"), "prop") * 52)` weeks each year. That apparently newsworthy changes in crime are actually commonplace might help explain why six days later on 2 April, the *New York Post* was able to report that felonies in New York City had increased 12% year-on-year "despite coronavirus" [@McCarthy:2020aa].
+
+```{r}
+earliest_data <- crime_counts %>% 
+  as_tibble() %>% 
+  group_by(city_name) %>% 
+  summarise(earliest = min(week))
+```
+
+To better estimate the expected frequency of crime in the absence of the pandemic, this report uses seasonal auto-regressive integrated moving average (SARIMA) models of the frequency of different crime types in each city between 1 January 2016^[Crime-count data from Dallas began on `r strftime(pull(filter(earliest_data, city_name == "Dallas, TX"), earliest), "%e %B %Y")` and data for Montgomery County began on `r strftime(pull(filter(earliest_data, city_name == "Montgomery County, MD"), earliest), "%e %B %Y")`.] and the first confirmed case of COVID-19 in the United States on 20 January 2020 [@Holshue2020]. The models incorporate both a dummy trend variable and 51 dummy variables for weekly seasonal terms, along with a variable denoting whether the week included a US federal public holiday. Separate models were estimated for each type of crime in each city, with the dependent variable in each model being the number of crimes recorded each week. 
+<!-- To allow time for crimes to be reported to and recorded by police, crimes in the current week were removed before analysis. -->
+
+SARIMA models require selection of the number of periods to use in calculating the seasonal and non-seasonal auto-regressive (AR) and moving-average (MA) terms in each model. The current study selected these terms automatically using the algorithm outlined by @Hyndman2008 as implemented in the `fable` package [@OHara-Wild:2020aa] in R version `r R.version$major`.`r R.version$minor` [@R-Core-Team:2019aa]. This estimates multiple models with different values for the SARIMA terms and then chooses the model which minimizes the Akaike information criterion (AIC), an estimator of prediction error. The selected model for each crime type in each city is shown, together with descriptive statistics, in Table 1. 
+
+The final column of Table 1 shows the mean absolute scaled error (MASE) of each model [@Hyndman2006]. MASE values smaller than 1 indicate that the chosen model performs better (i.e. has a smaller error) than a 'naïve' model in which crime frequency is simply forecast to be the same as in the previous week. Comparing the chosen model to a naïve model is particularly relevant in this case because a naïve forecasting model is functionally identical to attempting to identify changes in crime frequency solely through week-to-week comparisons, as in the media stories referenced above. In every case, the predictive error of the chosen SARIMA model was less than that of the equivalent naïve model.
+
+[Table 1 about here]
+
+The SARIMA models were used to forecast how many crimes in each category would be expected to occur in each city in the weeks after 20 January 2020 in the absence of the virus or any other change in crime trends. These forecasts acted as a synthetic comparison group against which to compare the actual frequency of crime during the pandemic. Due to the large number of such comparisons (one for each crime type in each city in each week), some actual frequencies would be expected to be different from the forecast frequency by chance. Controlling for this (for example by adjusting the significance threshold) is not straightforward, since the data are temporally autocorrelated. For the purposes of this analysis, actual crime counts outside the 99% confidence interval (rather than the more conventional 95%) of the forecast crime count were considered to be significantly different to the expected count of crime in the absence of the virus, but only if the actual count was outside the confidence interval for at least two consecutive weeks. While it is not possible to exclude other sources of variation that may have occurred at the same time as the beginning of the pandemic, it is unlikely that any change unrelated to the virus would occur simultaneously in all the cities under study.
+
+One alternative approach to modelling the influence of an event on the frequency of crime over time is the interrupted time series design, in which the presence of a relationship between the event and crime can be identified using a dummy variable denoting whether a crime count occurred before or after the event. This approach was not used here because the coronavirus pandemic was a slow-onset emergency that may have a relationship to crime that changes over time [@Frailing2017]. Interrupted time series designs are not appropriate in such circumstances because they assume that a clear distinction can be made between crimes occurring before and after the event under study [@Kontopantelis2015]. Such designs also provide only a single overall measure of the relationship between crime and an external event, whereas it is important to be able to identify evolving relationships caused by, for example, people adjusting to a new normal as an emergency unfolds [@Varano2010].
+
+The data and annotated R code for this analysis are available at `https://osf.io/ef4dw/`. COVID-19 case data were taken from @Dong2020 using the `COVID19` R package [@Guidotti:2020aa].
+
+
+
+# Results and discussion
+
+Figures 2 to 7 show the observed frequency of crimes of each type (the black line in each figure) along with the forecast frequency based on the corresponding SARIMA model. The model forecast is shown as a dashed line, with the associated 99% confidence interval shown as a grey band. Also shown on each figure are the date of the first COVID-19 case in the United States (which marks the end of the data with which the forecasts were made), together with the dates on which the relevant city or state government closed schools and issued a stay-at-home order. The percentages shown in the figures represent the percentage difference between the frequency of crime forecast by the model and the actual frequency. The figures include the observed frequency of crime up to the week ending `r strftime(max(crime_counts$week) + days(6), "%e %B %Y")` inclusive, the most-recent complete week of available data at the time of writing.
+
+Before considering patterns in individual types of crime, some general features across types can be identified. The first is that comparing actual crime to expected crime based on a forecasting model assumes that the frequency of crime would (in the absence of coronavirus) have continued to be shaped by the same forces as in previous years. While this will be true in many cases, it is likely that – for some types of crime in some cities – other factors will have lead crime frequency in 2020 to diverge from what might have been expected based on the frequency of crime in previous years. This can be seen, for example, in thefts of vehicles in Chicago, which were below the confidence interval even in late January.
+<!-- This can be seen in Figure 4, which shows that residential burglary in Chicago was above what might historically be expected even before the first US COVID-19 case on 20 January, and continued to be so until just before the city implemented its stay-at-home order on `r strftime(lockdowns$measure_date[lockdowns$city_name == "Chicago, IL" & lockdowns$measure_type == "stay at home"], "%d %B")`.  -->
+This is an inherent limitation of the synthetic comparison approach used in this study, but is likely to be unavoidable in the context of a global pandemic that meant there were no unaffected places to provide comparison data. The MASE values discussed above also show that, despite this limitation, the current approach is likely to be less error-prone than simple month-to-month and similar comparisons.
+
+```{r first date on which US had most new cases globally}
+first_us_epicentre_date <- national_cases %>% 
+  group_by(id) %>% 
+  mutate(new_cases = confirmed - lag(confirmed)) %>% 
+  ungroup() %>% 
+  group_by(date) %>% 
+  arrange((desc(new_cases))) %>% 
+  slice(1) %>% 
+  filter(id == "USA") %>% 
+  pull(date) %>% 
+  min()
+```
+
+The second general feature of note is that there is no apparent relationship between COVID-19 and crime of any type between the first US case on 20 January and the beginning of March, with possible effects emerging only later. This is unsurprising, since although by 1 March there had been `r scales::comma(global_cases$confirmed[global_cases$date == ymd("2020-03-01")], accuracy = 100)` cases of COVID-19 globally, only `r sum(pull(filter(state_cases, date == ymd("2020-03-01")), "confirmed"))` of those were in the United States (across `r number_to_text(nrow(filter(state_cases, date == ymd("2020-03-01"), confirmed > 0)))` states) and there had been only `r number_to_text(sum(pull(filter(state_cases, date == ymd("2020-03-01")), "deaths")))` US deaths. By the time the World Health Organization declared COVID-19 as a pandemic on 11 March [@World-Health-Organization:2020aa], the number of US cases had increased to `r scales::comma(sum(pull(filter(state_cases, date == ymd("2020-03-11")), "confirmed")))` in `r number_to_text(nrow(filter(state_cases, date == ymd("2020-03-11"), confirmed > 0)))` states, while from 22 March onward there were more new cases in the US each day than in any other country. Future researchers should therefore ensure their analytical methods do not conflate data from before and after early March, which might risk masking any effect.
+
+The third general finding from the figures presented below is that no type of crime changed uniformly in all of the cities under study. This should also be unsurprising, since crime is known to be heavily context dependent and the contexts of different cities vary considerably. To give two simple examples, median household income in San Francisco is more than double that in Baltimore, while population density is more than six times higher in Chicago than in Louisville [@US-Census-Bureau:2020aa]. Understanding the context underlying different relationships between coronavirus and crime is likely to be an important question for future researchers in this area.
+
+```{r results summary}
+results_summary <- process_chart_data(
+  crime_forecasts, 
+  crime_counts, 
+  unique(crime_forecasts$category)
+) %>% 
+  filter(week >= yearweek(ymd("2020-03-16")), !is.na(crimes)) %>% 
+  group_by(category, city_name) %>% 
+  mutate(
+    rel = case_when(
+      crimes > upper95 ~ "above",
+      crimes < lower95 ~ "below",
+      TRUE ~ "within"
+    ),
+    below = rel == "below" & lag(rel) == "below",
+    above = rel == "above" & lag(rel) == "above"
+  ) %>% 
+  summarise(below = any(below), above = any(above), 
+            diff = sum(crimes) - sum(estimate)) %>% 
+  ungroup() %>% 
+  mutate(
+    change = case_when(
+      below == TRUE & above == TRUE ~ "both",
+      below == TRUE ~ "below",
+      above == TRUE ~ "above",
+      TRUE ~ "within"
+    ),
+    increase = diff > 0
+  ) %>% 
+  select(category, city_name, change, increase) %>% 
+  mutate(desc = case_when(
+    change == "above" ~ "S inc",
+    change == "below" ~ "S dec",
+    change == "within" & increase == TRUE ~ "NS inc",
+    change == "within" & increase == FALSE ~ "NS dec",
+    TRUE ~ "no change"
+  ))
+```
+
+
+
+## Serious assaults
+
+[Figure 2 about here]
+
+Figure 2 shows that the frequency of assaults in public places was below that estimated by the SARIMA model in `r number_to_text(nrow(filter(results_summary, category == "serious assaults in public", increase == FALSE)))` of `r number_to_text(nrow(filter(results_summary, category == "serious assaults in public")))` cities, but in no case was the frequency consistently outside the 99% confidence interval of the model. This suggests the observed variation was within what would be expected based on the frequency of serious assaults in previous years. In some cases the confidence intervals are quite wide, reflecting the substantial week-to-week changes in crime frequency mentioned above. Overall, the frequency of serious assaults appears not to have systematically changed during the early weeks of the coronavirus pandemic.
+
+This is theoretically unexpected, given the data discussed above showing that the amount of time people spend in public places decreased substantially during the pandemic. This change in people's routine activities might be expected to have led to a decrease in assaults in public, but this does not appear to have happened. Further research into this question may need to explore any changes in who is involved in serious assaults during the pandemic. Since serious violence is known to be concentrated among a small number of persistent offenders and repeat victims [@Jennings2012], and that offenders who commit serious offences are also more likely to commit minor infractions such as breaching stay-at-home orders [@Roach:2018aa], it may be that those involved in serious assaults were no less likely to be on the streets during the pandemic than before. Future research should also look at the types of public place in which assaults have occurred: it may be that during the pandemic public assaults were displaced from those facilities seeing fewer people (such as retail malls) to those seeing more (such as parks).
+
+[Figure 3 about here]
+
+In the first weeks of the pandemic there was substantial concern among lawmakers and practitioners that the stay-at-home orders issued by many cities and states would lead to an increase in domestic assaults because victims would be trapped at home with their abusers [@Elinson:2020aa; @Taub:2020aa], with some media reporting that such increases had occurred. For example, in an online news article @Tolan:2020aa reported that of "20 large metropolitan police departments that provided data to CNN, nine saw double-digit percentage jumps in domestic violence cases or 911 calls in March, either compared to the previous year or to earlier months in 2020". Notwithstanding that month-to-month comparisons between February are flawed because March has 11% more days than February, such comparisons ignore that 11 of the departments did not see an increase and month-to-month comparisons take no account of the variability of crime over time.
+
+Figure 3 shows that, at least during the early part of the epidemic, concerns of a surge in domestic violence may have been unfounded. The observed frequency of serious assaults in residences (a category not necessarily identical to domestic violence) was above that forecast by the model in `r number_to_text(nrow(filter(results_summary, category == "serious assaults in residences", increase == TRUE)))` cities and below the model forecast in another `r number_to_text(nrow(filter(results_summary, category == "serious assaults in residences", increase == FALSE)))`, but in every case the observed frequency was within the confidence interval of the model estimates.
+
+Understanding the nature of domestic abuse from police data is always problematic because many incidents are not reported to police. During lockdowns, this problem may be exacerbated because victims might find it harder to get in touch with those who can help them. For this reason, the present study looked at only serious assaults, which are more likely to be reported than minor assaults. Nevertheless the present result should be treated with caution: as yet there is no evidence of a systematic increase in serious assaults in residences in large US cities, but it is possible that this is due to limitations in the data. The current findings should be validated against survey-based measures of victimization that take longer to become available (and may be impossible to collect during lockdowns).
+
+
+## Burglary
+
+```{r estimate Chicago burglary change}
+chicago_burglary_change <- crime_forecasts %>% 
+  process_chart_data(crime_counts, "residential burglary") %>% 
+  filter(city_name == "Chicago, IL", week >= ymd("2020-03-16"), 
+         !is.na(crimes)) %>% 
+  summarise(change = sum(estimate) - sum(crimes)) %>% 
+  pull("change")
+```
+
+[Figure 4 about here]
+
+Figure 4 shows the frequency of residential burglaries across `r number_to_text(nrow(filter(results_summary, category == "residential burglary")))` cities. The frequency of burglary is below the model estimate in `r number_to_text(nrow(filter(results_summary, category == "residential burglary", increase == FALSE)))` cities, although in `r number_to_text(nrow(filter(results_summary, category == "residential burglary", desc == "NS dec")))` of those it remains within the 99% confidence interval. In Chicago, Los Angeles and Memphis the frequency of burglary decreased below the lower confidence interval, with the frequency around half of what was forecast. In Chicago and Los Angeles, these reductions began during the week in which schools closed and stay-at-home orders were issued in those cities and were sustained each week afterwards. This means that, for example, in the four weeks after a stay-at-home order was issued in Chicago, there were approximately `r scales::comma(chicago_burglary_change, accuracy = 10)` fewer residential burglaries than would have been expected based on the model forecast. This is consistent with the routine activities approach, since stay-at-home orders mean people are more likely to be at home and so able to act as guardians of their property.
+
+Not all cities saw a decrease in residential burglary. For example, burglary in `r city_vector_to_text(pull(filter(results_summary, category == "residential burglary", increase == TRUE), city_name))` has largely tracked the forecasts produced by the respective models. The inconsistency of these trends across different cities is likely to be an important issue to explore in later research that can make use of more extensive data.
+
+[Figure 5 about here]
+
+Figure 5 shows the frequency of non-residential burglaries. In `r number_to_text(nrow(filter(results_summary, category == "non-residential burglary", increase == TRUE)))` of `r number_to_text(nrow(filter(results_summary, category == "non-residential burglary")))` cities, non-residential burglary was higher after lockdown measures began than forecast, but in only `r number_to_text(nrow(filter(results_summary, category == "non-residential burglary", change == "above")))` (`r city_vector_to_text(pull(filter(results_summary, category == "non-residential burglary", change == "above"), city_name))`) was the difference significant. 
+<!-- Meanwhile in `r number_to_text(nrow(filter(results_summary, category == "non-residential burglary", desc == "NS dec")))` cities, non-residential burglaries decreased (although in each case remaining inside the confidence interval).  -->
+This lack of a consistent increase may be theoretically unexpected, since the closure of many businesses and the increased number of people working from home might be expected to have decreased guardianship around many non-residential buildings. Further research into this area might usefully disaggregate non-residential burglary into different types of premises. It may be that non-residential burglary is particularly concentrated at establishments (such as pharmacies and liquor stores) that remained open throughout the lockdown period and so had the same levels of guardianship as previously.
+
+
+## Vehicle theft
+
+```{r estimate theft from vehicles change}
+vehicle_change <- crime_forecasts %>% 
+  process_chart_data(crime_counts, "theft from vehicle") %>% 
+  filter(
+    city_name %in% c("Los Angeles, CA", "San Francisco, CA"), 
+    between(week, ymd("2020-03-09"), ymd("2020-04-27")),
+    !is.na(crimes)
+  ) %>% 
+  group_by(city_name) %>% 
+  summarise(
+    change = sum(estimate) - sum(crimes), 
+    perc_change = abs((sum(crimes) - sum(estimate)) / sum(estimate))
+  )
+```
+
+[Figure 6 about here]
+
+Figure 6 shows that the frequency of thefts of motor vehicles had divergent patterns across cities. In `r city_vector_to_text(pull(filter(results_summary, category == "theft of vehicle", change == "above"), city_name))`, vehicle theft increased significantly in the weeks after lockdowns began, while in another `r number_to_text(nrow(filter(results_summary, category == "theft of vehicle", desc == "NS inc")))` there were smaller increases that remained within the confidence interval. Conversely, in `r city_vector_to_text(pull(filter(results_summary, category == "theft of vehicle", change == "below"), city_name))` vehicle theft decreased significantly. Figure 7 shows the frequency of thefts from vehicles, which decreased in `r number_to_text(nrow(filter(results_summary, category == "theft from vehicle", increase == FALSE)))` cities, in `r number_to_text(nrow(filter(results_summary, category == "theft from vehicle", change == "below")))` of them significantly. Some of these decreases were particularly large: between 9 March and 27 April there were around `r scales::comma(vehicle_change$change[vehicle_change$city_name == "San Francisco, CA"], accuracy = 10)` (`r scales::percent(vehicle_change$perc_change[vehicle_change$city_name == "San Francisco, CA"], accuracy = 1)`) fewer thefts from motor vehicles in San Francisco than forecast by the SARIMA model, and `r scales::comma(vehicle_change$change[vehicle_change$city_name == "Los Angeles, CA"], accuracy = 10)` (`r scales::percent(vehicle_change$perc_change[vehicle_change$city_name == "Los Angeles, CA"], accuracy = 1)`) fewer than forecast in Los Angeles.
+
+[Figure 7 about here]
+
+One of the main drivers of vehicle theft is likely to be the availability of unattended vehicles to steal or steal from. The distribution of vehicles may have changed during the pandemic, for example if more cars were parked outside the homes of furloughed people and fewer parked in downtown parking lots. Future research could therefore consider the changing distribution of thefts in different neighborhoods, e.g. did vehicle theft increase in suburbs while decreasing in business districts.
+
+
+# Conclusion: suggestions for future research
+
+At present, data are only available for the early months of the COVID-19 pandemic – the first US case was reported only `r round(as.numeric(difftime(now(), ymd("2020-01-20"), units = "weeks")))` weeks prior to the time of writing. While future research will be able to understand the relationships between coronavirus and crime in greater detail, reporting the available evidence now is valuable to avoid potential spurious conclusions derived from simple week-to-week or year-on-year comparisons. These initial results also help identify questions for future research.
+
+Overall, the present research found no significant changes in the frequency of serious assaults either in public or in residences (contrary to concerns among practitioners and policy makers), reductions in residential burglary in some (but not all) cities, little change in non-residential burglary (except in Minneapolis), decreases in thefts from vehicles in some cities, and diverging patterns of thefts of vehicles. It is noteworthy, however, that in no case were the patterns the same across all the cities under study.
+
+Since there were clear differences across crime types in the relationships between the pandemic and crime, it will be important for future research on these relationships to study disaggregated crime types. Studying crime as an undifferentiated whole is almost always inadvisable [@Cornish:2012aa] but the clear differences between crime types seen here suggest researchers should consider individual types disaggregated by location and victim type. Similarly, the differences seen across cities highlight the importance of studying the relationships between COVID-19 and different crime types in multiple settings. Much criminological research draws conclusions based on data from only one city [@Ashby:2019aa], but obtaining a robust understanding of any relationships in the present case – and of the limitations of those relationships – is likely to require data from multiple cities or other areas. While the present study was able to access data only from large cities in the United States, future studies should analyse these research questions across countries, as well as in suburban and rural areas.
+
+The present study focused solely on changes in crime immediately after cities and states implemented lockdowns to slow the progress of the epidemic. Future studies with access to more data will be able to understand how the patterns identified here will change over time, for example if increases or decreases in crime decay back to the level that would have been expected had the virus not occurred.
+
+The changes to society caused by the COVID-19 pandemic are some of the largest and most sudden to happen in the United States in several decades. They provide a valuable opportunity both to test criminological theory and to inform practice. This article has used data from the initial wave of the pandemic to identify potential patterns in different types of crime in different cities. Future research into coronavirus and crime should use these findings to help identify more-detailed research questions and priorities for primary data collection.
+
+<!-- The potential value of future research in this area means that it is particularly important that it is conducted transparently and robustly. The principles of open science outlined by @Miguel2014 can be used as a guide to ensure that data and materials are pro-actively made available so that other researchers can replicate and build upon the work of others. It is also important that the results of research in this area are widely available. At present, only around a quarter of criminological research is published outside the paywalls of subscription journals, even though authors have the right to distribute at least 95% of their articles freely [@Ashby:2020aa]. Researching the relationships between coronavirus and crime openly will enhance both the reliability of results and their wider impact. -->
+
+
+```{r export data}
+# export crime counts
+crime_counts %>% 
+  mutate(holidays = as.logical(holidays)) %>% 
+  select(city_name, category, week_beginning = week, holiday_in_week = holidays, 
+         actual_crimes = crimes) %>% 
+  write_csv(here::here("output/crime_counts.csv"))
+
+# export forecasts
+process_chart_data(
+  crime_forecasts, 
+  crime_counts, 
+  c("serious assaults in public", "serious assaults in residences", 
+    "residential burglary", "non-residential burglary", "theft of vehicle", 
+    "theft from vehicle")
+) %>% 
+  mutate(holidays = as.logical(holidays)) %>% 
+  select(city_name, category, week_beginning = week, holiday_in_week = holidays, 
+         estimated_crimes = estimate, estimate_lower_ci = lower95, 
+         estimate_upper_ci = upper95, actual_crimes = crimes) %>% 
+  write_csv(here::here("output/model_forecasts.csv"))
+```
+
+
+
+# Declarations
+
+*Data and materials*: the data and annotated R code used in this article are available under a Creative Commons Attribution License in the Open Science Framework repository at `https://osf.io/ef4dw/`
+
+*Competing interests*: the author declares that he has no competing interests.
+
+*Funding*: no funding was received in relation to the current research.
+
+*Acknowledgements*: thank you to Reka Solymosi of the University of Manchester for her helpful comments on an earlier version of this article.
+
+
+
+# Tables
+
+```{r include=TRUE}
+# calcuate accuracy scores
+model_accuracy <- crime_models %>% 
+  accuracy() %>%
+  left_join(excluded_combinations, by = c("category", "city_name")) %>% 
+  filter(is.na(excluded_combination)) %>% 
+  select(city_name, category, MASE)
+
+crime_models %>% 
+  mutate(
+    mean = map_dbl(arima, ~ mean(pluck(., "data", "crimes"), na.rm = TRUE)),
+    sd = map_dbl(arima, ~ sd(pluck(., "data", "crimes"), na.rm = TRUE)),
+    min = map_dbl(arima, ~ min(pluck(., "data", "crimes"), na.rm = TRUE)),
+    max = map_dbl(arima, ~ max(pluck(., "data", "crimes"), na.rm = TRUE)),
+    df = arima_df(crime_models$arima),
+    terms = map(arima, ~ pluck(., "fit", "spec"))
+  ) %>% 
+  as_tibble() %>% 
+  left_join(model_accuracy, by = c("city_name", "category")) %>% 
+  filter(city_name %in% current_cities) %>% 
+  select(-arima) %>% 
+  left_join(excluded_combinations, by = c("category", "city_name")) %>% 
+  filter(is.na(excluded_combination)) %>% 
+  mutate(category = factor(category, levels = c(
+    "serious assaults in public", "serious assaults in residences",
+    "residential burglary", "non-residential burglary", "theft of vehicle",
+    "theft from vehicle", "personal robbery"
+  ))) %>% 
+  arrange(category, city_name) %>% 
+  select(-excluded_combination) %>% 
+  unnest(cols = "terms") %>% 
+  mutate(
+    category = as.character(category),
+    category = ifelse(category != lag(category) | is.na(lag(category)), 
+                      category, ""),
+    MASE = scales::comma(MASE, accuracy = 0.01)
+  ) %>% 
+  mutate_at(vars(c("mean", "sd", "min", "max", "p", "q", "P", "df")), 
+            scales::number, accuracy = 1, big.mark = ",") %>% 
+  mutate_all(~ ifelse(is.na(.), "–", .)) %>% 
+  select(`crime type` = category, city = city_name, min, mean, SD = sd, max, 
+         `AR periods` = p, `MA periods` = q, `seasonal AR periods` = P, 
+         `degrees of freedom` = df, MASE) %>% 
+  knitr::kable(
+    align = "llrrrrrrrr",
+    caption = "Terms used in SARIMA models for estimating crime frequency without coronavirus. All models had zero seasonal MA periods."
+  )
+```
+
+
+
+# Figures
+
+```{r include=TRUE, fig.height=3, fig.width=6, fig.cap="Number of confirmed COVID-19 cases in the United States over time. The number of confirmed cases may be understated due to limited testing capacity."}
+case_thresholds <- us_cases %>% 
+  select(date, confirmed, roll_cases) %>% 
+  mutate(
+    cases_100 = confirmed >= 100, 
+    cases_1000 = confirmed >= 1000, 
+    cases_10000 = confirmed >= 10000,
+    cases_100000 = confirmed >= 100000,
+    cases_1000000 = confirmed >= 1000000
+  ) %>%
+  mutate_at(
+    vars(starts_with("cases_")), 
+    ~ ifelse(. == TRUE & lag(.) == FALSE, TRUE, NA)
+  ) %>% 
+  pivot_longer(-c("date", "confirmed", "roll_cases"), 
+               names_prefix = "cases_") %>% 
+  filter(value) %>% 
+  mutate(
+    label = glue::glue("{scales::comma(as.numeric(name))}+ cases by ", 
+                       "{str_trim(strftime(date, '%e %B'))}")
+  )
+
+us_cases %>% 
+  filter(confirmed >= 10) %>% 
+  ggplot(aes(date, roll_cases)) +
+  geom_label_repel(aes(label = label), data = case_thresholds, 
+                   xlim = c(NA, ymd("2020-02-28")), 
+                   colour = chart_elements$label_text_colour,
+                   size = chart_elements$label_text_size, 
+                   lineheight = chart_elements$label_text_lineheight, 
+                   segment.colour = chart_elements$label_line_colour, 
+                   label.size = NA, direction = "x") +
+  geom_area(na.rm = TRUE, fill = "grey85") +
+  geom_line(na.rm = TRUE) +
+  geom_point(data = case_thresholds) +
+  scale_x_date(date_breaks = "3 weeks", date_labels = "%d %b", 
+               expand = expansion(mult = c(0, 0))) +
+  scale_y_log10(expand = c(0, 0), labels = scales::comma_format(accuracy = 1)) +
+  labs(
+    x = NULL, 
+    y = "cumulative COVID-19 cases, log scale",
+    caption = paste("Chart shows seven-day center-weighted moving average.", 
+                    "Data source: Dong, Du, and Gardner 2020")
+  ) +
+  theme_ashby()
+
+ggsave(here::here("output/figure_1.pdf"), height = 174 / 2, width = 174, units = "mm")
+```
+
+
+```{r include=TRUE, fig.height=8, fig.width=7, fig.cap="Frequency of serious assaults in public during coronavirus pandemic compared to estimates of the number of assaults that would have occurred under normal conditions."}
+plot_chart(process_chart_data(
+  crime_forecasts, 
+  crime_counts, 
+  "serious assaults in public"
+), events)
+
+ggsave(
+  here::here("output/figure_2.pdf"), 
+  height = ((234 / 5.5) * 0.5) + ((234 / 5.5) * ceiling(length(unique(crime_forecasts$city_name[crime_forecasts$category == "serious assaults in public"])) / 2)), 
+  width = 174, 
+  units = "mm"
+)
+```
+
+
+```{r include=TRUE, fig.height=8, fig.width=7, fig.cap="Frequency of serious assaults in residences during coronavirus pandemic compared to estimates of the number of assaults that would have occurred under normal conditions."}
+plot_chart(process_chart_data(
+  crime_forecasts, 
+  crime_counts, 
+  "serious assaults in residences"
+), events)
+
+ggsave(
+  here::here("output/figure_3.pdf"), 
+  height = ((234 / 5.5) * 0.5) + ((234 / 5.5) * ceiling(length(unique(crime_forecasts$city_name[crime_forecasts$category == "serious assaults in residences"])) / 2)), 
+  width = 174, 
+  units = "mm"
+)
+```
+
+
+```{r include=TRUE, fig.height=8, fig.width=7, fig.cap="Frequency of residential burglaries during coronavirus pandemic compared to estimates of the number of assaults that would have occurred under normal conditions."}
+plot_chart(process_chart_data(
+  crime_forecasts, 
+  crime_counts, 
+  "residential burglary"
+), events)
+
+ggsave(
+  here::here("output/figure_4.pdf"), 
+  height = ((234 / 5.5) * 0.5) + ((234 / 5.5) * ceiling(length(unique(crime_forecasts$city_name[crime_forecasts$category == "residential burglary"])) / 2)), 
+  width = 174, 
+  units = "mm"
+)
+```
+
+
+```{r include=TRUE, fig.height=8, fig.width=7, fig.cap="Frequency of non-residential burglaries during coronavirus pandemic compared to estimates of the number of assaults that would have occurred under normal conditions."}
+plot_chart(process_chart_data(
+  crime_forecasts, 
+  crime_counts, 
+  "non-residential burglary"
+), events)
+
+ggsave(
+  here::here("output/figure_5.pdf"), 
+  height = ((234 / 5.5) * 0.5) + ((234 / 5.5) * ceiling(length(unique(crime_forecasts$city_name[crime_forecasts$category == "non-residential burglary"])) / 2)), 
+  width = 174, 
+  units = "mm"
+)
+```
+
+
+```{r include=TRUE, fig.height=8, fig.width=7, fig.cap="Frequency of thefts of vehicles during coronavirus pandemic compared to estimates of the number of assaults that would have occurred under normal conditions."}
+plot_chart(process_chart_data(
+  crime_forecasts, 
+  crime_counts, 
+  "theft of vehicle"
+), events)
+
+ggsave(
+  here::here("output/figure_6.pdf"), 
+  height = ((234 / 5.5) * 0.5) + ((234 / 5.5) * ceiling(length(unique(crime_forecasts$city_name[crime_forecasts$category == "theft of vehicle"])) / 2)), 
+  width = 174, 
+  units = "mm"
+)
+```
+
+
+```{r include=TRUE, fig.height=8, fig.width=7, fig.cap="Frequency of thefts from vehicles during coronavirus pandemic compared to estimates of the number of assaults that would have occurred under normal conditions."}
+plot_chart(process_chart_data(
+  crime_forecasts, 
+  crime_counts, 
+  "theft from vehicle"
+), events)
+
+ggsave(
+  here::here("output/figure_7.pdf"), 
+  height = ((234 / 5.5) * 0.5) + ((234 / 5.5) * ceiling(length(unique(crime_forecasts$city_name[crime_forecasts$category == "theft from vehicle"])) / 2)), 
+  width = 174, 
+  units = "mm"
+)
+```
+
+
+
+# References

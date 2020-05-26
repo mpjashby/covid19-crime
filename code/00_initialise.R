@@ -170,3 +170,21 @@ number_to_text <- function (x, ...) {
   }
   
 }
+
+# Convert vector of city names to text, removing state abbreviation
+city_vector_to_text <- function (x) {
+  
+  # vector_to_text() is defined in helpers.R
+  
+  vector_to_text(str_remove(x, "\\, \\w{2}$"))
+  
+}
+
+
+# Extract degrees of freedom from ARIMA model
+# calculation from https://stats.stackexchange.com/a/52554
+arima_df <- Vectorize(function (x) {
+  
+  nrow(x$fit$est) - nrow(x$fit$par)
+  
+})

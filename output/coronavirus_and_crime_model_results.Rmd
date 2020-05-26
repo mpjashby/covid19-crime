@@ -1,0 +1,135 @@
+---
+title: 'Initial evidence on COVID-19 and crime in the United States: model results
+  tables'
+author: "Matthew P J Ashby, Jill Dando Institute of Security and Crime Science, University College London"
+date: "15 May 2020"
+output:
+  pdf_document:
+    toc: true
+bibliography: ../../bibliography.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, include = FALSE, cache = TRUE)
+
+library("bookdown")
+library("pander")
+
+source(here::here("code/00_initialise.R"))
+```
+
+```{r load data}
+# load crime models
+load(here::here("analysis_data/crime_models.RData"))
+```
+
+```{r extract values from models}
+model_summaries <- crime_models %>% 
+  # extract coefficients etc from models
+  tidy() %>% 
+  # remove unnecessary rows and columns
+  select(-.model) %>% 
+  filter(category != "personal robbery") %>% 
+  mutate(
+    # order crime categories as in the paper
+    category = factor(category, levels = c(
+      "serious assaults in public", "serious assaults in residences", 
+      "residential burglary", "non-residential burglary", "theft of vehicle", 
+      "theft from vehicle")),
+    # change season() variable names
+    term = ifelse(
+      str_detect(term, "^season"), 
+      paste("week", str_remove(term, "season\\(\\)year"), "of the year"), 
+      term
+    ),
+    # change other variable names
+    term = recode(
+      term,
+      "ar1" = "AR(1)",
+      "ar2" = "AR(2)",
+      "ar3" = "AR(3)",
+      "ar4" = "AR(4)",
+      "ar5" = "AR(5)",
+      "ma1" = "MA(1)",
+      "ma2" = "MA(2)",
+      "ma3" = "MA(3)",
+      "sar1" = "SAR(1)",
+      "trend()" = "linear trend",
+      "holidays" = "holiday in week"
+    )
+  ) %>% 
+  arrange(category, city_name)
+```
+
+```{r export data}
+write_csv(model_summaries, here::here("output/model_results.csv"))
+```
+
+
+# Introduction
+
+The article 'Initial evidence on the relationship between the coronavirus pandemic and crime in the United States' -- available at `https://osf.io/ef4dw/` -- uses `r nrow(crime_models)` seasonal auto-regressive integrated moving average (SARIMA) models to estimate the frequency of crime in `r length(unique(crime_models$city_name))` of the 100 largest US cities. For reasons of space, the models are summarised in the paper and presented in full form in this supplementary material.
+
+Each model estimates the weekly frequency of a particular type of crime in a particular city. Each model contains the following variables:
+
+  * zero or more moving-average (MA) terms,
+  * zero or more auto-regressive (AR) terms,
+  * zero or more seasonal auto-regressive (SAR) terms,
+  * a linear trend term,
+  * 51 dummy term representing weeks of the year, and
+  * a dummy representing whether there is a US federal holiday in the week.
+
+The number of MA, AR and SAR terms is chosen automatically using the algorithm outlined by @Hyndman2008, in which multiple models with different values for the SARIMA terms are estimated and the model which minimizes the Akaike information criterion (AIC) estimator of prediction error is chosen.
+
+Table 1 of the article shows the mean absolute scaled error (MASE) of each model. The MASE, introduced by @Hyndman2006, compares the within-sample error of each model to the error of a corresponding naïve forecasting model. MASE values greater than one indicate a naîve model would have lower error, while values less than one indicate the chosen SARIMA model has a lower error. In all models used in this study, the MASE was lower than one. For many forecasting circumstances, it would be preferable to compare models by comparing out-of-sample forecasting error. In the present case no comparable out-of-sample data were available because the pandemic has occurred everywhere (precluding the use of data from other cities) and because data from after the beginning of the pandemic cannot be assumed to be comparable to those from before it began.
+
+The data in the following tables is also available in CSV format at `https://osf.io/qfsd5/`
+
+
+```{r print tables, message=FALSE, warning=FALSE, include=TRUE, results='asis'}
+walk(unique(model_summaries$category), function (x) {
+  
+  # print category
+  cat("\\pagebreak")
+  pandoc.header(str_to_sentence(x))
+  
+  walk(
+    unique(model_summaries$city_name[model_summaries$category == x]), 
+    function (y) {
+      
+      # set variable name for table header
+      var_name = paste(str_to_sentence(x), "in", y)
+      
+      # print model
+      model_summaries %>% 
+        filter(category == x, city_name == y) %>% 
+        select(-city_name, -category) %>% 
+        # format numberic values for printing
+        mutate_at(
+          vars(c("estimate", "std.error", "statistic")), 
+          ~ str_replace(scales::number(., accuracy = 0.01), "^-", "–")
+        ) %>% 
+        # format p values
+        mutate(p.value = scales::pvalue(p.value)) %>% 
+        # change variable order
+        mutate(term = fct_relevel(factor(term, levels = term), "intercept")) %>% 
+        # reorder table by variable name
+        arrange(term) %>% 
+        # change variable names for printing
+        select(!!var_name := term, estimate, `SE` = std.error, statistic, 
+               `$p$ value` = p.value) %>% 
+        pandoc.table(
+          style = "rmarkdown", 
+          justify = c("left", "right", "right", "right", "right"),
+          split.table = Inf
+        )
+      
+    }
+  )
+  
+})
+
+```
+
+
+# References

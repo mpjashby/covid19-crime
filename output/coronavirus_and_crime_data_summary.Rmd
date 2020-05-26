@@ -1,0 +1,106 @@
+---
+title: "Coronavirus pandemic and crime in the United States: data summary"
+author: "Matthew P J Ashby, Jill Dando Institute of Security and Crime Science, University College London"
+date: "15 May 2020"
+output: pdf_document
+classoption: landscape
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, include = FALSE, cache = TRUE)
+
+library("bookdown")
+
+source(here::here("code/00_initialise.R"))
+```
+
+The article 'Initial evidence on the relationship between the coronavirus pandemic and crime in the United States' uses seasonal auto-regressive integrated moving average (ARIMA) models to estimate the frequency of crime in large US cities. The article is accompanied by data files and materials available on the Open Science Framework at `https://osf.io/ef4dw/`
+
+Three data files are provided. All data are available under a Creative Commons Attribution (CC-BY) license. Annotated R code for processing the data are also provided.
+
+
+\pagebreak
+
+# Crime counts
+
+The file `crime_counts.csv` at `https://osf.io/2qx87/` contains the data used to estimate the ARIMA models used in the article. Each row represents a weekly count of crimes in a particular category in a particular city. The data extend from 1 January 2019 to 19 January 2020. A sample of rows from the file:
+
+```{r include=TRUE}
+here::here("output/crime_counts.csv") %>% 
+  read_csv(col_types = cols(
+    city_name = col_character(),
+    category = col_character(),
+    week_beginning = col_date(format = ""),
+    holiday_in_week = col_logical(),
+    actual_crimes = col_double()
+  )) %>% 
+  sample_n(20) %>% 
+  arrange(city_name, category, week_beginning) %>% 
+  knitr::kable()
+```
+
+The field `holiday_in_week` shows whether there was a US federal holiday in the relevant week.
+
+
+\pagebreak
+
+# Model co-efficients
+
+The file `model_results.csv` at `https://osf.io/qfsd5/` contains estimates, standard errors and associated $p$-values for the variables in each model. Additional information about this file is available at `https://osf.io/pzbvh/`
+
+A sample of rows from the file:
+
+```{r include=TRUE}
+here::here("output/model_results.csv") %>% 
+  read_csv(col_types = cols(
+    city_name = col_character(), 
+    category = col_character(),
+    term = col_character(),
+    .default = col_double()
+  )) %>% 
+  head(20) %>% 
+  arrange(city_name, category) %>% 
+  # format numberic values for printing
+  mutate_at(
+    vars(c("estimate", "std.error", "statistic")), 
+    ~ str_replace(scales::number(., accuracy = 0.01), "^-", "–")
+  ) %>% 
+  # format p values
+  mutate(p.value = scales::pvalue(p.value)) %>% 
+  knitr::kable(align = "lllrrrr")
+```
+
+
+\pagebreak
+
+# Model forecasts
+
+The file `model_forecasts.csv` at `https://osf.io/9yqu7/` contains the forecasts of the frequency of crime produced by the ARIMA models. Again, each row represents a weekly count of crimes in a particular category in a particular city. A sample of rows from the file:
+
+```{r include=TRUE}
+here::here("output/model_forecasts.csv") %>% 
+  read_csv(col_types = cols(
+    city_name = col_character(),
+    category = col_character(),
+    week_beginning = col_date(format = ""),
+    holiday_in_week = col_logical(),
+    .default = col_double()
+  )) %>% 
+  filter(!is.na(holiday_in_week)) %>% 
+  sample_n(20) %>% 
+  arrange(city_name, category, week_beginning) %>% 
+  # shorten long characters
+  mutate_at(
+    vars(c("city_name", "category")),
+    ~ ifelse(str_length(.) > 10, paste(str_sub(., end = 10), "…"), .)
+  ) %>% 
+  # format numberic values for printing
+  mutate_at(
+    vars(c("estimated_crimes", "estimate_lower_ci", "estimate_upper_ci")), 
+    round, 1
+  ) %>% 
+  knitr::kable()
+```
+
+The field `estimated_crimes` shows the number of crimes forecast to occur during each week. The fields `estimate_lower_ci` and `estimate_upper_ci` show the limits of the 99% confidence interval around that forecast. Forecasts are provided for weeks from 20 January 2020 onwards, with these fields having `NA` values before that date. The field `actual_crimes` shows the number of crimes actually recorded by police in that week, for comparison against the forecast. Values of `actual_crimes` are `NA` for dates after 19 April 2020 (for which forecasts are nevertheless available) or where data were missing from the original source data.
+

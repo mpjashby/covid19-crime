@@ -137,6 +137,7 @@ walk2(data_urls$string, data_urls$url, function (string, url) {
 
 # process Atlanta data
 # https://www.atlantapd.org/i-want-to/crime-data-downloads
+message("\nProcessing Atlanta data")
 dir("original_data", pattern = "raw_atlanta", full.names = TRUE) %>%
   map(unzip, exdir = here::here("original_data/atlanta")) %>%
   unlist() %>%
@@ -187,6 +188,7 @@ dir("original_data", pattern = "raw_atlanta", full.names = TRUE) %>%
 
 
 # process Austin data
+message("\nProcessing Austin data")
 here::here("original_data/raw_austin.csv") %>% 
   read_csv(
     col_types = cols(
@@ -318,6 +320,7 @@ here::here("original_data/raw_austin.csv") %>%
 
 # process Baltimore data
 # https://data.baltimorecity.gov/Public-Safety/BPD-Part-1-Victim-Based-Crime-Data/wsfq-mvij
+message("\nProcessing Baltimore data")
 here::here("original_data/raw_baltimore.csv") %>% 
   read_csv(col_types = cols(.default = col_character())) %>% 
   janitor::clean_names() %>% 
@@ -366,6 +369,7 @@ here::here("original_data/raw_baltimore.csv") %>%
 
 # process Boston data
 # https://data.boston.gov/dataset/crime-incident-reports-august-2015-to-date-source-new-system
+message("\nProcessing Boston data")
 here::here("original_data/raw_boston.csv") %>% 
   read_csv(col_types = cols(.default = col_character())) %>% 
   janitor::clean_names() %>% 
@@ -465,6 +469,7 @@ here::here("original_data/raw_boston.csv") %>%
 
 # process Chicago data
 # data are updated daily, excluding the most recent seven days
+message("\nProcessing Chicago data")
 dir("original_data", pattern = "raw_chicago", full.names = TRUE) %>% 
   map_dfr(read_csv, col_types = cols(.default = col_character())) %>% 
   janitor::clean_names() %>% 
@@ -535,6 +540,7 @@ dir("original_data", pattern = "raw_chicago", full.names = TRUE) %>%
 
 # process Dallas data
 # https://www.dallasopendata.com/Public-Safety/Police-Incidents/qv6i-rri7
+message("\nProcessing Dallas data")
 here::here("original_data/raw_dallas.csv") %>% 
   read_csv() %>% 
   janitor::clean_names() %>% 
@@ -571,6 +577,7 @@ here::here("original_data/raw_dallas.csv") %>%
 
 
 # process Los Angeles data
+message("\nProcessing Los Angeles data")
 dir("original_data", pattern = "raw_los_angeles", full.names = TRUE) %>% 
   map_dfr(
     read_csv, 
@@ -937,6 +944,7 @@ dir("original_data", pattern = "raw_los_angeles", full.names = TRUE) %>%
 
 
 # process Louisville data
+message("\nProcessing Louisville data")
 dir("original_data", pattern = "raw_louisville", full.names = TRUE) %>% 
   map_dfr(read_csv, col_types = cols(.default = col_character())) %>% 
   janitor::clean_names() %>% 
@@ -1361,6 +1369,7 @@ dir("original_data", pattern = "raw_louisville", full.names = TRUE) %>%
 
 
 # process Memphis data
+message("\nProcessing Memphis data")
 here::here("original_data/raw_memphis.csv") %>% 
   read_csv(col_types = cols(.default = col_character())) %>% 
   janitor::clean_names() %>% 
@@ -1472,36 +1481,40 @@ here::here("original_data/raw_memphis.csv") %>%
 
 # process Minneaopolis data
 # http://opendata.minneapolismn.gov/datasets/police-incidents-2019 et al
+message("\nProcessing Minneapolis data")
 dir("original_data", pattern = "raw_minneapolis", full.names = TRUE) %>% 
   map(read_csv, col_types = cols(.default = col_character())) %>% 
   map(janitor::clean_names) %>% 
   # the names of the fields changed mid-way through 2018, so these must be 
   # resolved before binding rows
   map(function (x) {
-    if ("publicaddress" %in% names(x)) {
-      x %>% 
-        select(-reported_date) %>% 
-        rename(public_address = publicaddress, ccn = case_number, long = x,
-             lat = y, reported_date = reported_date_time, gbsid = objectid,
-             last_changed = lastchanged, time = begin_time,
-             last_update_date = last_update_date_etl) %>% 
-        mutate(
-          time = str_pad(time, width = 4, side = "left", pad = "0"),
-          time = paste0(str_sub(time, 1, 2), ":", str_sub(time, 3, 4), ":00")
-        )
+    if ("time" %in% names(x)) {
+      select(x, begin_date, time, offense)
     } else {
-      x
+      select(x, begin_date, time = begin_time, offense)
     }
   }) %>% 
   bind_rows() %>% 
   # add date variable
   # new-format data include the time component as a separate field, so integrate
   # these first
-  mutate(begin_date = paste(as_date(begin_date), time)) %>% 
-  add_date_var("begin_date", "Ymd T", "America/Chicago") %>% 
-  # add year variable and remove offenses before start date
+  mutate(
+    # make sure `time` has at least four figures in it
+    temp_time = str_pad(time, 4, side = "left", pad = "0"),
+    temp_time = ifelse(
+      str_detect(temp_time, ":"),
+      temp_time,
+      str_glue("{str_sub(temp_time, end = 2)}:{str_sub(temp_time, -2)}:00")
+    ),
+    date_single = strftime(
+      parse_date_time(paste(as_date(begin_date), temp_time), "Ymd T"), 
+      format = '%Y-%m-%d %H:%M', 
+      tz = "America/Chicago"
+    ),
+    date_year = year(date_single)
+  ) %>% 
   filter_by_year(yearFirst, yearLast) %>% 
-  # # categorise offences
+  # categorise offences
   mutate(nibrs_offense_code = recode(
     offense,
     "ARSON" = "200",
@@ -1555,6 +1568,7 @@ dir("original_data", pattern = "raw_minneapolis", full.names = TRUE) %>%
 
 # process Montgomery County data
 # https://data.montgomerycountymd.gov/Public-Safety/Crime/icn6-v9z3
+message("\nProcessing Montgomery County data")
 here::here("original_data/raw_montgomery_county.csv") %>% 
   read_csv(col_types = cols(.default = col_character())) %>% 
   janitor::clean_names() %>% 
@@ -1604,6 +1618,7 @@ here::here("original_data/raw_montgomery_county.csv") %>%
   
 
 # process Nashville data
+message("\nProcessing Nashville data")
 dir("original_data", pattern = "raw_nashville", full.names = TRUE) %>% 
   map_dfr(read_csv, col_types = cols(.default = col_character())) %>% 
   janitor::clean_names() %>% 
@@ -1645,6 +1660,7 @@ dir("original_data", pattern = "raw_nashville", full.names = TRUE) %>%
 
 # process Philadelphia data
 # https://www.opendataphilly.org/dataset/crime-incidents
+message("\nProcessing Philadelphia data")
 here::here("original_data/raw_philadelphia.geojson") %>%
   sf::read_sf() %>%
   sf::st_set_geometry(NULL) %>% 
@@ -1710,6 +1726,7 @@ here::here("original_data/raw_philadelphia.geojson") %>%
 # process Phoenix data
 # https://phoenixopendata.com/dataset/crime-data/resource/0ce3411a-2fc6-4302-a33f-167f68608a20
 # data are updated daily, excluding the most recent seven days
+message("\nProcessing Phoenix data")
 here::here("original_data/raw_phoenix.csv") %>% 
   read_csv(col_types = cols(.default = col_character())) %>% 
   janitor::clean_names() %>% 
@@ -1752,29 +1769,31 @@ here::here("original_data/raw_phoenix.csv") %>%
 
 # process Sacramento data
 # http://data.cityofsacramento.org/search?q=crime%20data
-dir("original_data", pattern = "raw_sacramento", full.names = TRUE) %>% 
-  map_dfr(read_csv, col_types = cols(.default = col_character())) %>% 
-  janitor::clean_names() %>% 
-  # add date variable
-  add_date_var("occurence_date", "Ymd T", "America/Los_Angeles") %>% 
-  # add year variable and remove offenses before start date
-  filter_by_year(yearFirst, yearLast) %>% 
-  # categorise offences
-  left_join(read_csv(here::here("analysis_data/categories_sacramento.csv")),
-            by = c("offense_category", "description")) %>% 
-  left_join(read_csv(here::here("analysis_data/nibrs_categories.csv")), 
-            by = "nibrs_offense_type") %>% 
-  # add city name
-  mutate(city_name = "Sacramento, CA") %>% 
-  # select core variables
-  select(one_of(common_vars)) %>% 
-  # save data
-  write_rds(here::here("analysis_data/crime_data_sacramento.rds"),
-            compress = "gz")
+# message("\nProcessing Sacramento data")
+# dir("original_data", pattern = "raw_sacramento", full.names = TRUE) %>% 
+#   map_dfr(read_csv, col_types = cols(.default = col_character())) %>% 
+#   janitor::clean_names() %>% 
+#   # add date variable
+#   add_date_var("occurence_date", "Ymd T", "America/Los_Angeles") %>% 
+#   # add year variable and remove offenses before start date
+#   filter_by_year(yearFirst, yearLast) %>% 
+#   # categorise offences
+#   left_join(read_csv(here::here("analysis_data/categories_sacramento.csv")),
+#             by = c("offense_category", "description")) %>% 
+#   left_join(read_csv(here::here("analysis_data/nibrs_categories.csv")), 
+#             by = "nibrs_offense_type") %>% 
+#   # add city name
+#   mutate(city_name = "Sacramento, CA") %>% 
+#   # select core variables
+#   select(one_of(common_vars)) %>% 
+#   # save data
+#   write_rds(here::here("analysis_data/crime_data_sacramento.rds"),
+#             compress = "gz")
 
   
 
 # process San Francisco data
+message("\nProcessing San Francisco data")
 list(
   read_csv(here::here("original_data/raw_san_francisco_early.csv"),
            col_types= cols(.default = col_character())) %>% 
@@ -1844,12 +1863,14 @@ list(
 
 # process Tucson data
 # http://gisdata.tucsonaz.gov/search?groupIds=b6a49faa168647d8b56e1a06bd53600f&sort=-modified&tags=police
+message("\nProcessing Tucson data")
 dir(path = here::here("original_data"), pattern = '^raw_tucson_', 
     full.names = TRUE) %>% 
   map_dfr(read_csv, col_types = cols(.default = col_character())) %>% 
   janitor::clean_names() %>% 
   # add date variable
-  add_date_var("date_occu", "Ymd T", "America/Phoenix") %>% 
+  mutate(date_temp = paste(as_date(date_occu), hour_occu)) %>% 
+  add_date_var("date_temp", "Ymd HM", "America/Phoenix") %>% 
   # add year variable and remove offenses before start date
   filter_by_year(yearFirst, yearLast) %>% 
   # join NIBRS categories
@@ -1865,11 +1886,13 @@ dir(path = here::here("original_data"), pattern = '^raw_tucson_',
 
 
 # process Washington, DC data
+message("\nProcessing Washington, DC data")
 dir("original_data", pattern = "raw_washington", full.names = TRUE) %>% 
   map_dfr(read_csv, col_types = cols(.default = col_character())) %>% 
   janitor::clean_names() %>% 
   # add date variable
-  add_date_var("start_date", "Ymd T", "America/New_York") %>% 
+  mutate(temp_date = str_sub(start_date, 0, 19)) %>% 
+  add_date_var("temp_date", "Ymd T", "America/New_York") %>% 
   # add year variable and remove offenses before start date
   filter_by_year(yearFirst, yearLast) %>% 
   # categorise offences

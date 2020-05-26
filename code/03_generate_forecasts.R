@@ -66,7 +66,10 @@ forecast_data <- expand.grid(
   as_tsibble(key = c(city_name, category), index = week)
 
 # generate forecasts
-crime_forecasts <- forecast(crime_models, forecast_data)
+crime_forecasts <- forecast(
+  filter(crime_models, city_name != "Sacramento, CA"), 
+  filter(forecast_data, city_name != "Sacramento, CA")
+)
 
 # save forecasts
 write_rds(crime_forecasts, here::here("analysis_data/crime_forecasts.rds"))
